@@ -1,14 +1,60 @@
 # Helper functions for data transformation and display
 
+# Browse tab category definitions
+# Each category maps to search keywords used with the R-hub search API
+BROWSE_CATEGORIES <- c(
+  "Data Wrangling" = "data manipulation wrangling transform",
+  "Visualization" = "plotting visualization graphics chart",
+  "Machine Learning" = "machine learning prediction",
+  "Statistical Methods" = "statistical test inference",
+  "Time Series" = "time series forecast temporal",
+  "Spatial & Mapping" = "spatial map geographic geospatial",
+  "Text & NLP" = "text mining natural language corpus",
+  "Web & APIs" = "web API http scraping REST client",
+  "Databases" = "database SQL connection driver DBI",
+  "Reporting" = "report markdown document knitr quarto",
+  "Finance & Economics" = "finance economic trading portfolio",
+  "Bioinformatics" = "bioinformatics genomics biological",
+  "Bayesian" = "bayesian MCMC posterior sampling prior",
+  "Survival Analysis" = "survival hazard censoring kaplan cox",
+  "High Performance" = "parallel computing performance Rcpp",
+  "Reproducibility" = "reproducible pipeline workflow"
+)
+
 #' Format large numbers with commas
 format_number <- function(x) {
   if (is.na(x) || is.null(x)) return("N/A")
   formatC(x, format = "d", big.mark = ",")
 }
 
+#' Build an HTML links string for a package
+#' @param pkg_name Character, the package name
+#' @return Character, HTML string with icon links
+package_links_html <- function(pkg_name) {
+  cran <- paste0(
+    "https://cran.r-project.org/package=", pkg_name
+  )
+  docs <- paste0(
+    "https://cran.r-project.org/web/packages/",
+    pkg_name, "/vignettes/"
+  )
+
+  paste0(
+    "<a href=\"", cran,
+    "\" target=\"_blank\" title=\"CRAN page\">",
+    "<i class=\"fa-solid fa-box\"></i></a>",
+    "&nbsp;&nbsp;",
+    "<a href=\"", docs,
+    "\" target=\"_blank\" title=\"Documentation\">",
+    "<i class=\"fa-solid fa-book\"></i></a>"
+  )
+}
+
 #' Calculate a maintenance health score (0-100)
-#' Based on recency of updates, download trends, reverse deps, etc.
-calculate_health_score <- function(metadata, versions_data, download_totals, rev_deps) {
+#' Based on recency of updates, download trends, etc.
+calculate_health_score <- function(
+  metadata, versions_data, download_totals, rev_deps
+) {
   score <- 0
   max_score <- 0
   details <- list()
@@ -36,12 +82,15 @@ calculate_health_score <- function(metadata, versions_data, download_totals, rev
         details$recency <- "Updated within last 2 years"
       } else {
         score <- score + 3
-        details$recency <- paste0("Last updated ", round(days_since / 365, 1), " years ago")
+        details$recency <- paste0(
+          "Last updated ",
+          round(days_since / 365, 1), " years ago"
+        )
       }
     }
   }
 
-  # 2. Download momentum (max 25 points) — monthly vs yearly average
+  # 2. Download momentum (max 25 points)
   max_score <- max_score + 25
   monthly <- download_totals$last_month
   yearly <- download_totals$last_year
@@ -91,16 +140,26 @@ calculate_health_score <- function(metadata, versions_data, download_totals, rev
   rev_total <- rev_deps$total
   if (rev_total >= 100) {
     score <- score + 15
-    details$ecosystem <- paste0(rev_total, " reverse dependencies — core ecosystem package")
+    details$ecosystem <- paste0(
+      rev_total, " reverse dependencies",
+      " \u2014 core ecosystem package"
+    )
   } else if (rev_total >= 20) {
     score <- score + 12
-    details$ecosystem <- paste0(rev_total, " reverse dependencies — well-established")
+    details$ecosystem <- paste0(
+      rev_total,
+      " reverse dependencies \u2014 well-established"
+    )
   } else if (rev_total >= 5) {
     score <- score + 8
-    details$ecosystem <- paste0(rev_total, " reverse dependencies")
+    details$ecosystem <- paste0(
+      rev_total, " reverse dependencies"
+    )
   } else if (rev_total >= 1) {
     score <- score + 4
-    details$ecosystem <- paste0(rev_total, " reverse dependency")
+    details$ecosystem <- paste0(
+      rev_total, " reverse dependency"
+    )
   } else {
     details$ecosystem <- "No reverse dependencies"
   }
@@ -111,31 +170,38 @@ calculate_health_score <- function(metadata, versions_data, download_totals, rev
     n_versions <- length(versions_data$versions)
     if (n_versions >= 10) {
       score <- score + 10
-      details$maturity <- paste0(n_versions, " releases — mature package")
+      details$maturity <- paste0(
+        n_versions, " releases \u2014 mature package"
+      )
     } else if (n_versions >= 5) {
       score <- score + 7
       details$maturity <- paste0(n_versions, " releases")
     } else if (n_versions >= 2) {
       score <- score + 4
-      details$maturity <- paste0(n_versions, " releases — relatively new")
+      details$maturity <- paste0(
+        n_versions, " releases \u2014 relatively new"
+      )
     } else {
       score <- score + 1
       details$maturity <- "Single release"
     }
   }
 
-  final_score <- if (max_score > 0) round(score / max_score * 100) else 0
+  final_score <- if (max_score > 0) {
+    round(score / max_score * 100)
+  } else {
+    0
+  }
 
   list(score = final_score, details = details)
 }
 
 #' Get a color for the health score
 health_score_color <- function(score) {
-  if (score >= 75) return("#22c55e")      # green
-
-if (score >= 50) return("#eab308")      # yellow
-  if (score >= 25) return("#f97316")      # orange
-  return("#ef4444")                        # red
+  if (score >= 75) return("#22c55e")
+  if (score >= 50) return("#eab308")
+  if (score >= 25) return("#f97316")
+  "#ef4444"
 }
 
 #' Get a label for the health score
@@ -143,29 +209,39 @@ health_score_label <- function(score) {
   if (score >= 75) return("Excellent")
   if (score >= 50) return("Good")
   if (score >= 25) return("Fair")
-  return("Poor")
+  "Poor"
 }
 
 #' Parse dependency strings into a clean data frame
 parse_dependencies <- function(deps_list) {
   if (is.null(deps_list) || length(deps_list) == 0) {
-    return(data.frame(package = character(), version = character(), stringsAsFactors = FALSE))
+    return(data.frame(
+      package = character(),
+      version = character(),
+      stringsAsFactors = FALSE
+    ))
   }
 
   data.frame(
     package = names(deps_list),
-    version = vapply(deps_list, function(x) if (is.null(x) || x == "*") "any" else x, character(1)),
+    version = vapply(
+      deps_list,
+      function(x) {
+        if (is.null(x) || x == "*") "any" else x
+      },
+      character(1)
+    ),
     stringsAsFactors = FALSE
   )
 }
 
-#' Build a version history data frame from crandb /all response
+#' Build a version history data frame from crandb /all
 build_version_history <- function(versions_data) {
-  if (is.null(versions_data$timeline) || length(versions_data$timeline) == 0) {
+  timeline <- versions_data$timeline
+  if (is.null(timeline) || length(timeline) == 0) {
     return(NULL)
   }
 
-  timeline <- versions_data$timeline
   versions <- names(timeline)
   dates <- as.Date(substr(unlist(timeline), 1, 10))
 

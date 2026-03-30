@@ -13,128 +13,138 @@ server <- function(input, output, session) {
     download_totals = NULL,
     rev_deps = NULL,
     health = NULL,
-    search_results = NULL,
     compare_data = NULL
   )
 
   # --- Search ---
-  observeEvent(input$search_btn, {
-    req(nchar(trimws(input$search_query)) > 0)
-    query <- trimws(input$search_query)
-
-    rv$search_results <- NULL
-    rv$selected_pkg <- NULL
-
-    withProgress(message = "Searching CRAN...", {
-      results <- search_packages(query)
-      rv$search_results <- results
-    })
-  })
-
-  # Allow Enter key to trigger search
   observeEvent(input$search_query, {
-    # This is handled by the actionButton binding
+    req(nchar(trimws(input$search_query)) > 0)
+    load_package(trimws(input$search_query))
   }, ignoreInit = TRUE)
-
-  # Render search results as clickable list
-  output$search_results_ui <- renderUI({
-    results <- rv$search_results
-    if (is.null(results) || nrow(results) == 0) {
-      if (!is.null(rv$search_results)) {
-        return(p("No packages found.", class = "text-muted"))
-      }
-      return(NULL)
-    }
-
-    tags$div(
-      class = "list-group",
-      lapply(seq_len(nrow(results)), function(i) {
-        pkg <- results$package[i]
-        actionLink(
-          inputId = paste0("select_pkg_", i),
-          label = tags$div(
-            class = "list-group-item list-group-item-action p-2",
-            tags$strong(pkg),
-            tags$span(paste0(" v", results$version[i]), class = "text-muted small"),
-            tags$br(),
-            tags$small(results$title[i], class = "text-muted")
-          )
-        )
-      })
-    )
-  })
-
-  # Handle package selection from search results
-  observe({
-    results <- rv$search_results
-    req(results)
-
-    lapply(seq_len(nrow(results)), function(i) {
-      observeEvent(input[[paste0("select_pkg_", i)]], {
-        load_package(results$package[i])
-      }, ignoreInit = TRUE)
-    })
-  })
 
   # Core function to load all package data
   load_package <- function(pkg_name) {
-    withProgress(message = paste("Loading", pkg_name, "..."), {
-      incProgress(0.1, detail = "Fetching metadata")
-      rv$metadata <- fetch_package_metadata(pkg_name)
+    withProgress(
+      message = paste("Loading", pkg_name, "..."),
+      {
+        incProgress(0.1, detail = "Fetching metadata")
+        rv$metadata <- fetch_package_metadata(pkg_name)
 
-      if (is.null(rv$metadata)) {
-        showNotification(paste("Package", pkg_name, "not found on CRAN."),
-                          type = "error")
-        return()
+        if (is.null(rv$metadata)) {
+          showNotification(
+            paste("Package", pkg_name, "not found."),
+            type = "error"
+          )
+          return()
+        }
+
+        rv$selected_pkg <- pkg_name
+
+        incProgress(
+          0.2, detail = "Fetching version history"
+        )
+        rv$versions <- fetch_package_versions(pkg_name)
+
+        incProgress(
+          0.2, detail = "Fetching download stats"
+        )
+        rv$download_totals <- fetch_download_totals(
+          pkg_name
+        )
+
+        incProgress(
+          0.2, detail = "Fetching daily downloads"
+        )
+        rv$downloads_daily <- fetch_daily_downloads(
+          pkg_name
+        )
+
+        incProgress(
+          0.2, detail = "Fetching reverse dependencies"
+        )
+        rv$rev_deps <- fetch_reverse_deps(pkg_name)
+
+        incProgress(
+          0.1, detail = "Calculating health score"
+        )
+        rv$health <- calculate_health_score(
+          rv$metadata, rv$versions,
+          rv$download_totals, rv$rev_deps
+        )
       }
-
-      rv$selected_pkg <- pkg_name
-
-      incProgress(0.2, detail = "Fetching version history")
-      rv$versions <- fetch_package_versions(pkg_name)
-
-      incProgress(0.2, detail = "Fetching download stats")
-      rv$download_totals <- fetch_download_totals(pkg_name)
-
-      incProgress(0.2, detail = "Fetching daily downloads")
-      rv$downloads_daily <- fetch_daily_downloads(pkg_name)
-
-      incProgress(0.2, detail = "Fetching reverse dependencies")
-      rv$rev_deps <- fetch_reverse_deps(pkg_name)
-
-      incProgress(0.1, detail = "Calculating health score")
-      rv$health <- calculate_health_score(
-        rv$metadata, rv$versions, rv$download_totals, rv$rev_deps
-      )
-    })
+    )
   }
 
   # --- Outputs ---
 
   # Flag for conditional panels
-  output$package_loaded <- reactive({ !is.null(rv$selected_pkg) })
-  outputOptions(output, "package_loaded", suspendWhenHidden = FALSE)
+  output$package_loaded <- reactive({
+    !is.null(rv$selected_pkg)
+  })
+  outputOptions(
+    output, "package_loaded",
+    suspendWhenHidden = FALSE
+  )
 
   # Package header
   output$package_header <- renderUI({
     req(rv$metadata)
     meta <- rv$metadata
+
+    homepage_link <- NULL
+    if (!is.null(meta$URL) && nchar(meta$URL) > 0) {
+      first_url <- strsplit(meta$URL, "[,\\s]+")[[1]][1]
+      homepage_link <- tags$a(
+        href = first_url,
+        icon("link"), "Homepage",
+        target = "_blank", class = "small"
+      )
+    }
+
+    issues_link <- NULL
+    if (!is.null(meta$BugReports) &&
+          nchar(meta$BugReports) > 0) {
+      issues_link <- tags$a(
+        href = meta$BugReports,
+        icon("bug"), "Issues",
+        target = "_blank", class = "small"
+      )
+    }
+
+    cran_url <- paste0(
+      "https://cran.r-project.org/package=",
+      meta$Package
+    )
+
     tags$div(
       class = "mb-3",
-      h2(meta$Package, tags$small(paste0("v", meta$Version), class = "text-muted")),
+      h2(
+        meta$Package,
+        tags$small(
+          paste0("v", meta$Version),
+          class = "text-muted"
+        )
+      ),
       p(meta$Title, class = "lead"),
       tags$div(
         class = "d-flex gap-3 flex-wrap",
-        tags$span(icon("user"), meta$Author %||% "Unknown", class = "text-muted small"),
-        tags$span(icon("scale-balanced"), meta$License %||% "Unknown", class = "text-muted small"),
-        if (!is.null(meta$URL) && nchar(meta$URL) > 0)
-          tags$a(href = strsplit(meta$URL, "[,\\s]+")[[1]][1],
-                 icon("link"), "Homepage", target = "_blank", class = "small"),
-        if (!is.null(meta$BugReports) && nchar(meta$BugReports) > 0)
-          tags$a(href = meta$BugReports,
-                 icon("bug"), "Issues", target = "_blank", class = "small"),
-        tags$a(href = paste0("https://cran.r-project.org/package=", meta$Package),
-               icon("box"), "CRAN", target = "_blank", class = "small")
+        tags$span(
+          icon("user"),
+          meta$Author %||% "Unknown",
+          class = "text-muted small"
+        ),
+        tags$span(
+          icon("scale-balanced"),
+          meta$License %||% "Unknown",
+          class = "text-muted small"
+        ),
+        homepage_link,
+        issues_link,
+        tags$a(
+          href = cran_url,
+          icon("box"), "CRAN",
+          target = "_blank", class = "small"
+        )
       )
     )
   })
@@ -164,12 +174,18 @@ server <- function(input, output, session) {
 
     # Aggregate to weekly for smoother trend
     df$week <- as.Date(cut(df$date, "week"))
-    weekly <- aggregate(count ~ week, data = df, FUN = sum)
+    weekly <- aggregate(
+      count ~ week, data = df, FUN = sum
+    )
 
-    plot_ly(weekly, x = ~week, y = ~count, type = "scatter", mode = "lines",
-            fill = "tozeroy",
-            line = list(color = "#2c3e50"),
-            fillcolor = "rgba(44, 62, 80, 0.1)") |>
+    plot_ly(
+      weekly,
+      x = ~week, y = ~count,
+      type = "scatter", mode = "lines",
+      fill = "tozeroy",
+      line = list(color = "#2c3e50"),
+      fillcolor = "rgba(44, 62, 80, 0.1)"
+    ) |>
       layout(
         xaxis = list(title = ""),
         yaxis = list(title = "Weekly Downloads"),
@@ -186,18 +202,33 @@ server <- function(input, output, session) {
     color <- health_score_color(score)
     label <- health_score_label(score)
 
+    circle_style <- paste0(
+      "width: 120px; height: 120px; ",
+      "border-radius: 50%; ",
+      "border: 8px solid ", color, "; ",
+      "display: flex; flex-direction: column; ",
+      "align-items: center; ",
+      "justify-content: center; ",
+      "margin: 0 auto;"
+    )
+
+    score_style <- paste0(
+      "font-size: 2.5rem; ",
+      "font-weight: bold; color: ", color
+    )
+
+    label_style <- paste0(
+      "color: ", color, "; ",
+      "font-weight: 600; font-size: 1.1rem;"
+    )
+
     tags$div(
       class = "text-center",
       tags$div(
-        style = paste0(
-          "width: 120px; height: 120px; border-radius: 50%; ",
-          "border: 8px solid ", color, "; ",
-          "display: flex; flex-direction: column; align-items: center; justify-content: center; ",
-          "margin: 0 auto;"
-        ),
-        tags$span(score, style = paste0("font-size: 2.5rem; font-weight: bold; color: ", color)),
+        style = circle_style,
+        tags$span(score, style = score_style)
       ),
-      tags$span(label, style = paste0("color: ", color, "; font-weight: 600; font-size: 1.1rem;"))
+      tags$span(label, style = label_style)
     )
   })
 
@@ -208,7 +239,10 @@ server <- function(input, output, session) {
       class = "list-unstyled small",
       lapply(names(details), function(key) {
         tags$li(
-          icon("circle-check", class = "text-muted me-1"),
+          icon(
+            "circle-check",
+            class = "text-muted me-1"
+          ),
           details[[key]]
         )
       })
@@ -222,8 +256,12 @@ server <- function(input, output, session) {
 
     first_published <- NULL
     if (!is.null(rv$versions$timeline)) {
-      dates <- as.Date(substr(unlist(rv$versions$timeline), 1, 10))
-      first_published <- format(min(dates, na.rm = TRUE), "%Y-%m-%d")
+      dates <- as.Date(
+        substr(unlist(rv$versions$timeline), 1, 10)
+      )
+      first_published <- format(
+        min(dates, na.rm = TRUE), "%Y-%m-%d"
+      )
     }
 
     last_published <- meta$`Date/Publication`
@@ -231,28 +269,93 @@ server <- function(input, output, session) {
       last_published <- substr(last_published, 1, 10)
     }
 
-    maintainer <- gsub("<.*>", "", meta$Maintainer %||% "Unknown")
+    maintainer <- gsub(
+      "<.*>", "", meta$Maintainer %||% "Unknown"
+    )
+
+    # Build links list
+    links <- list()
+    links[["CRAN"]] <- paste0(
+      "https://cran.r-project.org/package=",
+      meta$Package
+    )
+    links[["Documentation"]] <- paste0(
+      "https://cran.r-project.org/web/packages/",
+      meta$Package, "/vignettes/"
+    )
+    if (!is.null(meta$URL) && nchar(meta$URL) > 0) {
+      urls <- trimws(
+        strsplit(meta$URL, "[,\\s]+")[[1]]
+      )
+      for (u in urls) {
+        if (grepl("github\\.com", u, TRUE)) {
+          links[["GitHub"]] <- u
+        } else {
+          links[["Homepage"]] <- u
+        }
+      }
+    }
+    if (!is.null(meta$BugReports) &&
+          nchar(meta$BugReports) > 0) {
+      links[["Issues"]] <- meta$BugReports
+    }
+
+    links_ui <- tags$div(
+      class = "d-flex gap-2 flex-wrap",
+      lapply(names(links), function(lbl) {
+        ico <- switch(
+          lbl,
+          "CRAN" = "box",
+          "Documentation" = "book",
+          "GitHub" = "code-branch",
+          "Homepage" = "link",
+          "Issues" = "bug",
+          "link"
+        )
+        tags$a(
+          href = links[[lbl]],
+          target = "_blank",
+          class = "btn btn-sm btn-outline-secondary",
+          icon(ico), lbl
+        )
+      })
+    )
 
     fields <- list(
       "Description" = meta$Description,
       "Maintainer" = trimws(maintainer),
       "License" = meta$License,
-      "First Published" = first_published %||% "Unknown",
-      "Last Published" = last_published %||% "Unknown",
-      "R Version Required" = meta$Depends$R %||% "Not specified",
-      "NeedsCompilation" = meta$NeedsCompilation %||% "Unknown",
-      "Encoding" = meta$Encoding %||% "Unknown"
+      "First Published" =
+        first_published %||% "Unknown",
+      "Last Published" =
+        last_published %||% "Unknown",
+      "R Version Required" =
+        meta$Depends$R %||% "Not specified",
+      "NeedsCompilation" =
+        meta$NeedsCompilation %||% "Unknown",
+      "Encoding" =
+        meta$Encoding %||% "Unknown"
     )
 
-    tags$table(
-      class = "table table-sm",
-      tags$tbody(
-        lapply(names(fields), function(key) {
-          tags$tr(
-            tags$td(tags$strong(key), style = "width: 35%; white-space: nowrap;"),
-            tags$td(fields[[key]])
-          )
-        })
+    tags$div(
+      links_ui,
+      tags$hr(),
+      tags$table(
+        class = "table table-sm",
+        tags$tbody(
+          lapply(names(fields), function(key) {
+            tags$tr(
+              tags$td(
+                tags$strong(key),
+                style = paste(
+                  "width: 35%;",
+                  "white-space: nowrap;"
+                )
+              ),
+              tags$td(fields[[key]])
+            )
+          })
+        )
       )
     )
   })
@@ -263,12 +366,19 @@ server <- function(input, output, session) {
       req(rv$metadata)
       deps <- rv$metadata[[dep_type]]
       if (is.null(deps) || length(deps) == 0) {
-        return(data.frame(Package = "None", Version = "", stringsAsFactors = FALSE))
+        return(data.frame(
+          Package = "None", Version = "",
+          stringsAsFactors = FALSE
+        ))
       }
       df <- parse_dependencies(deps)
       names(df) <- c("Package", "Version Constraint")
       df
-    }, options = list(pageLength = 10, dom = "tip", searching = FALSE),
+    },
+    options = list(
+      pageLength = 10, dom = "tip",
+      searching = FALSE
+    ),
     rownames = FALSE, class = "compact")
   }
 
@@ -281,50 +391,191 @@ server <- function(input, output, session) {
     req(rv$versions)
     vh <- build_version_history(rv$versions)
     if (is.null(vh)) {
-      return(data.frame(Version = "N/A", Date = "", `Days Ago` = "", stringsAsFactors = FALSE))
+      return(data.frame(
+        Version = "N/A", Date = "",
+        `Days Ago` = "",
+        stringsAsFactors = FALSE
+      ))
     }
     vh$date <- format(vh$date, "%Y-%m-%d")
     names(vh) <- c("Version", "Date", "Days Ago")
     vh
-  }, options = list(pageLength = 8, dom = "tip"), rownames = FALSE, class = "compact")
+  },
+  options = list(pageLength = 8, dom = "tip"),
+  rownames = FALSE, class = "compact")
 
   # Reverse dependencies summary
   output$rev_deps_summary <- renderUI({
     req(rv$rev_deps)
     rd <- rv$rev_deps
 
+    dep_row <- function(label, value) {
+      tags$tr(
+        tags$td(label),
+        tags$td(tags$strong(format_number(value)))
+      )
+    }
+
     tags$div(
       tags$div(
         class = "display-6 text-center mb-3",
         format_number(rd$total),
-        tags$small("packages depend on this", class = "text-muted d-block fs-6")
+        tags$small(
+          "packages depend on this",
+          class = "text-muted d-block fs-6"
+        )
       ),
       tags$table(
         class = "table table-sm",
         tags$tbody(
-          tags$tr(tags$td("Depends"), tags$td(tags$strong(format_number(rd$depends)))),
-          tags$tr(tags$td("Imports"), tags$td(tags$strong(format_number(rd$imports)))),
-          tags$tr(tags$td("Suggests"), tags$td(tags$strong(format_number(rd$suggests)))),
-          tags$tr(tags$td("LinkingTo"), tags$td(tags$strong(format_number(rd$linking_to))))
+          dep_row("Depends", rd$depends),
+          dep_row("Imports", rd$imports),
+          dep_row("Suggests", rd$suggests),
+          dep_row("LinkingTo", rd$linking_to)
         )
       )
     )
   })
 
+  # --- Browse Tab ---
+
+  rv$browse_results <- NULL
+  rv$browse_label <- NULL
+
+  output$browse_has_results <- reactive({
+    !is.null(rv$browse_results)
+  })
+  outputOptions(
+    output, "browse_has_results",
+    suspendWhenHidden = FALSE
+  )
+
+  output$browse_results_header <- renderText({
+    rv$browse_label
+  })
+
+  # Popular packages
+  observeEvent(input$browse_popular_btn, {
+    withProgress(
+      message = "Fetching popular packages...",
+      {
+        rv$browse_results <- fetch_top_downloads(50)
+        rv$browse_label <- paste(
+          "Popular Packages (Last Month)"
+        )
+      }
+    )
+  })
+
+  # Category selection
+  observeEvent(input$browse_category, {
+    req(nchar(input$browse_category) > 0)
+    category <- input$browse_category
+    query <- BROWSE_CATEGORIES[[category]]
+
+    withProgress(
+      message = paste(
+        "Loading", category, "packages..."
+      ),
+      {
+        rv$browse_results <- search_packages(
+          query, limit = 50
+        )
+        rv$browse_label <- category
+      }
+    )
+  }, ignoreInit = TRUE)
+
+  # A-Z letter buttons
+  lapply(LETTERS, function(l) {
+    observeEvent(input[[paste0("az_", l)]], {
+      withProgress(
+        message = paste0(
+          "Loading packages starting with ",
+          l, "..."
+        ),
+        {
+          rv$browse_results <- search_packages(
+            paste0("package:", l, "*"), limit = 50
+          )
+          rv$browse_label <- paste(
+            "Packages starting with", l
+          )
+        }
+      )
+    })
+  })
+
+  # Browse results table
+  output$browse_table <- renderDT({
+    req(rv$browse_results)
+    df <- rv$browse_results
+
+    if ("downloads" %in% names(df)) {
+      pkg_names <- df$package
+      df$downloads <- format_number(df$downloads)
+      df$Links <- vapply(
+        pkg_names, package_links_html,
+        character(1)
+      )
+      names(df) <- c("Package", "Downloads", "Links")
+    } else if ("package" %in% names(df)) {
+      df$Links <- vapply(
+        df$package, package_links_html,
+        character(1)
+      )
+      df <- df[, c("package", "title", "version", "Links")]
+      names(df) <- c(
+        "Package", "Title", "Version", "Links"
+      )
+    }
+    df
+  },
+  selection = "single", rownames = FALSE,
+  escape = FALSE,
+  options = list(pageLength = 20, dom = "frtip"),
+  class = "compact hover")
+
+  # Click a row to load in Explorer
+  observeEvent(input$browse_table_rows_selected, {
+    row <- input$browse_table_rows_selected
+    req(row)
+    df <- rv$browse_results
+    pkg <- if ("package" %in% names(df)) {
+      df$package[row]
+    } else {
+      df$Package[row]
+    }
+    req(pkg)
+    load_package(pkg)
+    nav_select("main_nav", selected = "Explorer")
+  })
+
   # --- Compare Tab ---
 
-  output$comparison_loaded <- reactive({ !is.null(rv$compare_data) })
-  outputOptions(output, "comparison_loaded", suspendWhenHidden = FALSE)
+  output$comparison_loaded <- reactive({
+    !is.null(rv$compare_data)
+  })
+  outputOptions(
+    output, "comparison_loaded",
+    suspendWhenHidden = FALSE
+  )
 
   observeEvent(input$compare_btn, {
-    pkgs <- c(trimws(input$compare_pkg1), trimws(input$compare_pkg2))
+    pkgs <- c(
+      trimws(input$compare_pkg1),
+      trimws(input$compare_pkg2)
+    )
     if (nchar(trimws(input$compare_pkg3)) > 0) {
       pkgs <- c(pkgs, trimws(input$compare_pkg3))
     }
     pkgs <- pkgs[nchar(pkgs) > 0]
 
     if (length(pkgs) < 2) {
-      showNotification("Enter at least 2 package names.", type = "warning")
+      showNotification(
+        "Enter at least 2 package names.",
+        type = "warning"
+      )
       return()
     }
 
@@ -337,8 +588,10 @@ server <- function(input, output, session) {
         totals <- fetch_download_totals(pkg)
         daily <- fetch_daily_downloads(pkg)
         versions <- fetch_package_versions(pkg)
-        rev_deps <- fetch_reverse_deps(pkg)
-        health <- calculate_health_score(meta, versions, totals, rev_deps)
+        rdeps <- fetch_reverse_deps(pkg)
+        health <- calculate_health_score(
+          meta, versions, totals, rdeps
+        )
 
         list(
           package = pkg,
@@ -346,7 +599,7 @@ server <- function(input, output, session) {
           totals = totals,
           daily = daily,
           versions = versions,
-          rev_deps = rev_deps,
+          rev_deps = rdeps,
           health = health
         )
       })
@@ -354,7 +607,10 @@ server <- function(input, output, session) {
       compare <- Filter(Negate(is.null), compare)
 
       if (length(compare) < 2) {
-        showNotification("Could not find enough valid packages.", type = "error")
+        showNotification(
+          "Could not find enough valid packages.",
+          type = "error"
+        )
         return()
       }
 
@@ -366,7 +622,9 @@ server <- function(input, output, session) {
     req(rv$compare_data)
     compare <- rv$compare_data
 
-    colors <- c("#2c3e50", "#e74c3c", "#27ae60", "#8e44ad")
+    colors <- c(
+      "#2c3e50", "#e74c3c", "#27ae60", "#8e44ad"
+    )
 
     p <- plot_ly()
 
@@ -374,24 +632,31 @@ server <- function(input, output, session) {
       df <- compare[[i]]$daily
       if (!is.null(df)) {
         df$week <- as.Date(cut(df$date, "week"))
-        weekly <- aggregate(count ~ week, data = df, FUN = sum)
-
-        p <- p |> add_trace(
-          data = weekly, x = ~week, y = ~count,
-          type = "scatter", mode = "lines",
-          name = compare[[i]]$package,
-          line = list(color = colors[i], width = 2)
+        weekly <- aggregate(
+          count ~ week, data = df, FUN = sum
         )
+
+        p <- p |>
+          add_trace(
+            data = weekly, x = ~week, y = ~count,
+            type = "scatter", mode = "lines",
+            name = compare[[i]]$package,
+            line = list(
+              color = colors[i], width = 2
+            )
+          )
       }
     }
 
-    p |> layout(
-      xaxis = list(title = ""),
-      yaxis = list(title = "Weekly Downloads"),
-      hovermode = "x unified",
-      margin = list(t = 10),
-      legend = list(orientation = "h", y = -0.1)
-    ) |> config(displayModeBar = FALSE)
+    p |>
+      layout(
+        xaxis = list(title = ""),
+        yaxis = list(title = "Weekly Downloads"),
+        hovermode = "x unified",
+        margin = list(t = 10),
+        legend = list(orientation = "h", y = -0.1)
+      ) |>
+      config(displayModeBar = FALSE)
   })
 
   output$compare_table <- renderDT({
@@ -403,19 +668,37 @@ server <- function(input, output, session) {
       totals <- item$totals
       versions <- item$versions
 
-      n_versions <- if (!is.null(versions$versions)) length(versions$versions) else NA
+      n_ver <- if (!is.null(versions$versions)) {
+        length(versions$versions)
+      } else {
+        NA
+      }
 
       last_pub <- meta$`Date/Publication`
-      if (!is.null(last_pub)) last_pub <- substr(last_pub, 1, 10)
+      if (!is.null(last_pub)) {
+        last_pub <- substr(last_pub, 1, 10)
+      }
 
       data.frame(
         Package = item$package,
         Version = meta$Version %||% "",
-        `Viability Score` = paste0(item$health$score, "/100"),
-        `Monthly Downloads` = format_number(totals$last_month),
-        `Yearly Downloads` = format_number(totals$last_year),
-        `Reverse Deps` = format_number(item$rev_deps$total),
-        Releases = if (!is.na(n_versions)) as.character(n_versions) else "N/A",
+        `Viability Score` = paste0(
+          item$health$score, "/100"
+        ),
+        `Monthly Downloads` = format_number(
+          totals$last_month
+        ),
+        `Yearly Downloads` = format_number(
+          totals$last_year
+        ),
+        `Reverse Deps` = format_number(
+          item$rev_deps$total
+        ),
+        Releases = if (!is.na(n_ver)) {
+          as.character(n_ver)
+        } else {
+          "N/A"
+        },
         `Last Published` = last_pub %||% "N/A",
         License = meta$License %||% "",
         stringsAsFactors = FALSE,
@@ -423,8 +706,13 @@ server <- function(input, output, session) {
       )
     }
 
-    df <- do.call(rbind, lapply(compare, build_row))
+    df <- do.call(
+      rbind, lapply(compare, build_row)
+    )
     df
-  }, options = list(dom = "t", ordering = FALSE, paging = FALSE),
+  },
+  options = list(
+    dom = "t", ordering = FALSE, paging = FALSE
+  ),
   rownames = FALSE, class = "compact")
 }

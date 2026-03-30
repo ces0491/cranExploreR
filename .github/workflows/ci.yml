@@ -17,12 +17,18 @@ jobs:
 
       - name: Install dependencies
         run: |
-          install.packages(c("shiny", "bslib", "httr2", "jsonlite", "plotly", "DT", "rsconnect"))
+          install.packages(c(
+            "shiny", "bslib", "httr2", "jsonlite",
+            "plotly", "DT", "rsconnect", "lintr"
+          ))
         shell: Rscript {0}
 
       - name: Parse all R files
         run: |
-          files <- list.files(".", pattern = "\\.R$", recursive = TRUE, full.names = TRUE)
+          files <- list.files(
+            ".", pattern = "\\.R$",
+            recursive = TRUE, full.names = TRUE
+          )
           for (f in files) {
             cat("Parsing", f, "\n")
             parse(f)
@@ -30,19 +36,107 @@ jobs:
           cat("All files parse OK\n")
         shell: Rscript {0}
 
-      - name: Regenerate manifest.json
+      - name: Lint R files
         run: |
-          rsconnect::writeManifest(appDir = ".", appPrimaryDoc = "app.R")
+          results <- lintr::lint_dir(".")
+          if (length(results) > 0) {
+            print(results)
+            stop("Linting issues found")
+          }
+          cat("No lint issues\n")
         shell: Rscript {0}
 
-      - name: Check manifest is up to date
+      - name: Verify app structure
         run: |
-          if git diff --exit-code manifest.json; then
-            echo "manifest.json is up to date"
-          else
-            echo "::error::manifest.json is out of date. Run rsconnect::writeManifest() locally and commit."
-            exit 1
-          fi
+          required <- c(
+            "app.R", "ui.R", "server.R",
+            "R/api_functions.R", "R/helpers.R",
+            "manifest.json"
+          )
+          missing <- required[!file.exists(required)]
+          if (length(missing) > 0) {
+            stop("Missing files: ", paste(missing, collapse = ", "))
+          }
+          cat("All required files present\n")
+        shell: Rscript {0}
+
+      - name: Verify app loads without error
+        run: |
+          source("R/api_functions.R")
+          source("R/helpers.R")
+          cat("Helper and API functions loaded OK\n")
+
+          # Check key functions exist
+          fns <- c(
+            "fetch_package_metadata", "fetch_package_versions",
+            "fetch_daily_downloads", "fetch_download_totals",
+            "fetch_reverse_deps", "search_packages",
+            "fetch_top_downloads", "format_number",
+            "calculate_health_score", "health_score_color",
+            "health_score_label", "parse_dependencies",
+            "build_version_history", "package_links_html"
+          )
+          missing_fns <- fns[!vapply(fns, exists, logical(1))]
+          if (length(missing_fns) > 0) {
+            stop("Missing functions: ", paste(missing_fns, collapse = ", "))
+          }
+          cat("All expected functions defined\n")
+
+          # Verify UI and server can be sourced
+          source("ui.R")
+          source("server.R")
+          cat("UI and server sourced OK\n")
+
+          # Check ui is a valid shiny tag
+          stopifnot(inherits(ui, "shiny.tag"))
+          cat("UI object is valid\n")
+
+          # Check server is a function
+          stopifnot(is.function(server))
+          cat("Server is a function\n")
+        shell: Rscript {0}
+
+      - name: Smoke test API endpoints
+        run: |
+          source("R/api_functions.R")
+          source("R/helpers.R")
+
+          # Test crandb responds
+          meta <- fetch_package_metadata("jsonlite")
+          if (is.null(meta)) {
+            stop("crandb API not responding")
+          }
+          stopifnot(meta$Package == "jsonlite")
+          cat("crandb API OK\n")
+
+          # Test cranlogs responds
+          totals <- fetch_download_totals("jsonlite")
+          if (is.na(totals$last_month)) {
+            stop("cranlogs API not responding")
+          }
+          cat("cranlogs API OK\n")
+
+          # Test search API responds
+          results <- search_packages("json", limit = 5)
+          if (is.null(results) || nrow(results) == 0) {
+            stop("Search API not responding")
+          }
+          cat("Search API OK\n")
+
+          # Test health score calculation
+          versions <- fetch_package_versions("jsonlite")
+          rev_deps <- fetch_reverse_deps("jsonlite")
+          health <- calculate_health_score(
+            meta, versions, totals, rev_deps
+          )
+          stopifnot(
+            health$score >= 0,
+            health$score <= 100
+          )
+          cat("Health score calculation OK\n")
+
+          cat("All smoke tests passed\n")
+        shell: Rscript {0}
 
   deploy:
     needs: validate

@@ -3,43 +3,6 @@ library(bslib)
 library(plotly)
 library(DT)
 
-# nolint start: line_length_linter.
-# JS strings inside selectizeInput exceed 80 chars by necessity.
-search_load_js <- I("function(query, callback) {
-  if (query.length < 2) return callback();
-  var url = 'https://search.r-pkg.org/package/_search?q='
-    + encodeURIComponent(query) + '&size=10';
-  fetch(url)
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      var hits = data.hits && data.hits.hits
-        ? data.hits.hits : [];
-      callback(hits.map(function(hit) {
-        var s = hit._source || {};
-        var pkg = s.Package || s.package || '';
-        var ttl = s.Title || s.title || '';
-        var ver = s.Version || s.version || '';
-        return {
-          value: pkg, label: pkg,
-          title: ttl, version: ver
-        };
-      }));
-    })
-    .catch(function() { callback(); });
-}")
-
-search_render_js <- list(
-  option = I("function(item, escape) {
-    return '<div class=\"p-2\">'
-      + '<strong>' + escape(item.value) + '</strong>'
-      + '<span class=\"text-muted small\"> v'
-      + escape(item.version) + '</span><br>'
-      + '<small class=\"text-muted\">'
-      + escape(item.title) + '</small></div>';
-  }")
-)
-# nolint end
-
 ui <- page_navbar(
   id = "main_nav",
   title = "cranExploreR",
@@ -59,22 +22,17 @@ ui <- page_navbar(
       sidebar = sidebar(
         width = 350,
         title = "Search CRAN",
-        selectizeInput(
-          "search_query",
-          label = NULL,
-          choices = NULL,
-          multiple = FALSE,
-          width = "100%",
-          options = list(
-            placeholder = "Type a package name...",
-            valueField = "value",
-            labelField = "label",
-            searchField = "value",
-            loadThrottle = 300,
-            load = search_load_js,
-            render = search_render_js
-          )
-        )
+        textInput(
+          "search_query", label = NULL,
+          placeholder = "e.g. dplyr, ggplot2"
+        ),
+        actionButton(
+          "search_btn", "Search",
+          class = "btn-primary w-100 mb-3",
+          icon = icon("magnifying-glass")
+        ),
+        hr(),
+        uiOutput("search_results_ui")
       ),
 
       # Main content
@@ -215,6 +173,17 @@ ui <- page_navbar(
       sidebar = sidebar(
         width = 350,
         title = "Compare Packages",
+        textInput(
+          "compare_search", label = NULL,
+          placeholder = "Search for a package..."
+        ),
+        actionButton(
+          "compare_search_btn", "Find",
+          class = "btn-outline-secondary w-100 mb-2",
+          icon = icon("magnifying-glass")
+        ),
+        uiOutput("compare_search_results_ui"),
+        hr(),
         textInput(
           "compare_pkg1", "Package 1",
           placeholder = "e.g. dplyr"

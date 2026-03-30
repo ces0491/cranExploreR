@@ -58,11 +58,21 @@ fetch_daily_downloads <- function(
       resp_body_string(resp), simplifyVector = TRUE
     )
 
-    if (!is.null(data$downloads) &&
-          is.data.frame(data$downloads)) {
-      df <- data$downloads
-      df$date <- as.Date(df$date)
-      return(df)
+    # Extract downloads data frame from response
+    dl <- data$downloads
+    if (is.list(dl) && !is.data.frame(dl)) {
+      dl <- dl[[1]]
+    }
+    if (!is.null(dl) && is.data.frame(dl) && nrow(dl) > 0) {
+      # Normalize column names (API returns day/downloads)
+      if ("day" %in% names(dl)) {
+        names(dl)[names(dl) == "day"] <- "date"
+      }
+      if ("downloads" %in% names(dl)) {
+        names(dl)[names(dl) == "downloads"] <- "count"
+      }
+      dl$date <- as.Date(dl$date)
+      return(dl)
     }
     NULL
   }, error = function(e) {
@@ -254,6 +264,12 @@ fetch_top_downloads <- function(count = 30) {
 
     if (!is.null(downloads) &&
           is.data.frame(downloads)) {
+      # Ensure downloads column is numeric
+      if ("downloads" %in% names(downloads)) {
+        downloads$downloads <- as.numeric(
+          downloads$downloads
+        )
+      }
       return(downloads)
     }
     NULL

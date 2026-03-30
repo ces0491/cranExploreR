@@ -17,10 +17,73 @@ server <- function(input, output, session) {
   )
 
   # --- Search ---
-  observeEvent(input$search_query, {
+  rv$search_results <- NULL
+
+  observeEvent(input$search_btn, {
     req(nchar(trimws(input$search_query)) > 0)
-    load_package(trimws(input$search_query))
-  }, ignoreInit = TRUE)
+    query <- trimws(input$search_query)
+
+    rv$search_results <- NULL
+    rv$selected_pkg <- NULL
+
+    withProgress(message = "Searching CRAN...", {
+      rv$search_results <- search_packages(query)
+    })
+  })
+
+  output$search_results_ui <- renderUI({
+    results <- rv$search_results
+    if (is.null(results) || nrow(results) == 0) {
+      if (!is.null(rv$search_results)) {
+        return(p(
+          "No packages found.",
+          class = "text-muted"
+        ))
+      }
+      return(NULL)
+    }
+
+    tags$div(
+      class = "list-group",
+      lapply(seq_len(nrow(results)), function(i) {
+        pkg <- results$package[i]
+        actionLink(
+          inputId = paste0("select_pkg_", i),
+          label = tags$div(
+            class = paste(
+              "list-group-item",
+              "list-group-item-action p-2"
+            ),
+            tags$strong(pkg),
+            tags$span(
+              paste0(" v", results$version[i]),
+              class = "text-muted small"
+            ),
+            tags$br(),
+            tags$small(
+              results$title[i],
+              class = "text-muted"
+            )
+          )
+        )
+      })
+    )
+  })
+
+  observe({
+    results <- rv$search_results
+    req(results)
+
+    lapply(seq_len(nrow(results)), function(i) {
+      observeEvent(
+        input[[paste0("select_pkg_", i)]],
+        {
+          load_package(results$package[i])
+        },
+        ignoreInit = TRUE
+      )
+    })
+  })
 
   # Core function to load all package data
   load_package <- function(pkg_name) {
@@ -513,7 +576,9 @@ server <- function(input, output, session) {
 
     if ("downloads" %in% names(df)) {
       pkg_names <- df$package
-      df$downloads <- format_number(df$downloads)
+      df$downloads <- vapply(
+        df$downloads, format_number, character(1)
+      )
       df$Links <- vapply(
         pkg_names, package_links_html,
         character(1)
@@ -552,6 +617,84 @@ server <- function(input, output, session) {
   })
 
   # --- Compare Tab ---
+
+  rv$compare_search_results <- NULL
+
+  observeEvent(input$compare_search_btn, {
+    req(nchar(trimws(input$compare_search)) > 0)
+    query <- trimws(input$compare_search)
+    withProgress(message = "Searching...", {
+      rv$compare_search_results <- search_packages(
+        query, limit = 10
+      )
+    })
+  })
+
+  output$compare_search_results_ui <- renderUI({
+    results <- rv$compare_search_results
+    if (is.null(results) || nrow(results) == 0) {
+      if (!is.null(rv$compare_search_results)) {
+        return(p(
+          "No packages found.",
+          class = "text-muted small"
+        ))
+      }
+      return(NULL)
+    }
+
+    tags$div(
+      class = "list-group mb-2",
+      lapply(seq_len(nrow(results)), function(i) {
+        actionLink(
+          inputId = paste0("compare_pick_", i),
+          label = tags$div(
+            class = paste(
+              "list-group-item",
+              "list-group-item-action py-1 px-2"
+            ),
+            tags$strong(
+              results$package[i],
+              class = "small"
+            ),
+            tags$span(
+              paste0(" v", results$version[i]),
+              class = "text-muted small"
+            )
+          )
+        )
+      })
+    )
+  })
+
+  observe({
+    results <- rv$compare_search_results
+    req(results)
+
+    lapply(seq_len(nrow(results)), function(i) {
+      observeEvent(
+        input[[paste0("compare_pick_", i)]],
+        {
+          pkg <- results$package[i]
+          # Fill next empty slot
+          if (nchar(trimws(input$compare_pkg1)) == 0) {
+            updateTextInput(
+              session, "compare_pkg1", value = pkg
+            )
+          } else if (nchar(trimws(input$compare_pkg2)) == 0) {
+            updateTextInput(
+              session, "compare_pkg2", value = pkg
+            )
+          } else {
+            updateTextInput(
+              session, "compare_pkg3", value = pkg
+            )
+          }
+          rv$compare_search_results <- NULL
+        },
+        ignoreInit = TRUE
+      )
+    })
+  })
 
   output$comparison_loaded <- reactive({
     !is.null(rv$compare_data)

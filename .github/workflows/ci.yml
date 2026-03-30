@@ -87,8 +87,11 @@ jobs:
           source("server.R")
           cat("UI and server sourced OK\n")
 
-          # Check ui is a valid shiny tag
-          stopifnot(inherits(ui, "shiny.tag"))
+          # Check ui is a valid shiny UI object
+          stopifnot(
+            inherits(ui, "shiny.tag") ||
+            inherits(ui, "shiny.tag.list")
+          )
           cat("UI object is valid\n")
 
           # Check server is a function

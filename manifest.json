@@ -2074,20 +2074,29 @@
     }
   },
   "files": {
+    ".github/workflows/ci.yml": {
+      "checksum": "a8a753819b1f45f46d22dc7fad682602"
+    },
+    ".lintr": {
+      "checksum": "cab5fdb2dddacc6c56d2f1389a469519"
+    },
     "app.R": {
       "checksum": "3626b7722275d3bd1ad5884a15a808f9"
     },
     "R/api_functions.R": {
-      "checksum": "0982f04ae4293c4a5ccaf492ca4e0e8e"
+      "checksum": "64d4e8b7ae20669c4956d4028c980416"
     },
     "R/helpers.R": {
-      "checksum": "e39ee567e3b4e3199bb5a848c0a04c5d"
+      "checksum": "4429b0d343155d152ec37e029f0fe8b7"
+    },
+    "README.md": {
+      "checksum": "01d91a15bb920cd6e627972f5c3795cc"
     },
     "server.R": {
-      "checksum": "8974190ac779005ca3382ca34a95fa22"
+      "checksum": "37b71624228bab62cda3f217a8bc9db1"
     },
     "ui.R": {
-      "checksum": "283ab2168c5f2b94d736682e4907b4d6"
+      "checksum": "aa782a8021ebd2c7b563fe3350c6ab3b"
     }
   },
   "users": null

@@ -3,8 +3,6 @@ name: CI
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
 
 jobs:
   validate:
@@ -45,3 +43,15 @@ jobs:
             echo "::error::manifest.json is out of date. Run rsconnect::writeManifest() locally and commit."
             exit 1
           fi
+
+  deploy:
+    needs: validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to deploy branch
+        run: git push origin HEAD:deploy --force

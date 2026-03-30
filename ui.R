@@ -3,9 +3,28 @@ library(bslib)
 library(plotly)
 library(DT)
 
+# nolint start: line_length_linter.
+custom_js <- tags$script(HTML("
+$(document).on('keypress', '#search_query', function(e) {
+  if (e.which === 13) { $('#search_btn').click(); }
+});
+$(document).on('keypress', '#compare_search', function(e) {
+  if (e.which === 13) { $('#compare_search_btn').click(); }
+});
+"))
+# nolint end
+
+custom_css <- tags$style(HTML(
+  ".bslib-value-box .value-box-value {
+    font-size: clamp(1.2rem, 2.5vw, 2rem);
+    white-space: nowrap;
+  }"
+))
+
 ui <- page_navbar(
   id = "main_nav",
   title = "cranExploreR",
+  header = tagList(custom_js, custom_css),
   theme = bs_theme(
     version = 5,
     bootswatch = "flatly",
@@ -46,25 +65,25 @@ ui <- page_navbar(
           col_widths = c(3, 3, 3, 3),
           fill = FALSE,
           value_box(
-            title = "Last Day",
+            title = "Yesterday",
             value = textOutput("dl_day"),
             showcase = icon("calendar-day"),
             theme = "primary"
           ),
           value_box(
-            title = "Last Week",
+            title = "Past 7 Days",
             value = textOutput("dl_week"),
             showcase = icon("calendar-week"),
             theme = "info"
           ),
           value_box(
-            title = "Last Month",
+            title = "Past 30 Days",
             value = textOutput("dl_month"),
             showcase = icon("calendar"),
             theme = "success"
           ),
           value_box(
-            title = "Last Year",
+            title = "Past 365 Days",
             value = textOutput("dl_year"),
             showcase = icon("chart-line"),
             theme = "warning"

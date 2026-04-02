@@ -95,11 +95,27 @@ ui <- page_navbar(
 
           card(
             card_header(
-              "Download Trend (Last 12 Months)"
+              class = paste(
+                "d-flex justify-content-between",
+                "align-items-center"
+              ),
+              "Download Trend (Last 12 Months)",
+              checkboxGroupInput(
+                "trend_series",
+                label = NULL,
+                choices = c(
+                  "Weekly" = "weekly",
+                  "Cumulative" = "cumulative",
+                  "4-Wk Avg" = "rolling_avg"
+                ),
+                selected = "weekly",
+                inline = TRUE
+              )
             ),
             card_body(
               plotlyOutput(
-                "download_trend_plot", height = "350px"
+                "download_trend_plot",
+                height = "350px"
               )
             )
           ),
@@ -356,15 +372,169 @@ ui <- page_navbar(
     card(
       card_body(
         class = "mx-auto",
-        style = "max-width: 700px;",
+        style = "max-width: 800px;",
         h3("cranExploreR"),
         p(
-          "A Shiny app for exploring CRAN package",
-          "viability. Search for any R package to",
-          "see download statistics, maintenance",
-          "health, dependency information,",
-          "and version history."
+          "An interactive dashboard for evaluating",
+          "CRAN packages before you add them to",
+          "your project. Choosing the right",
+          "dependencies is one of the most",
+          "consequential decisions in any R",
+          "project \u2014 a package that loses its",
+          "maintainer, stops getting updates, or",
+          "has a shrinking user base can become a",
+          "liability that is expensive to replace",
+          "later."
         ),
+
+        h5("Why Package Viability Matters"),
+        tags$ul(
+          tags$li(
+            tags$strong("Production systems"),
+            " \u2014 If your Shiny app or pipeline",
+            "depends on a package that hasn't been",
+            "updated in years, a breaking change in",
+            "R or another dependency could leave you",
+            "scrambling for a fix with no upstream",
+            "support."
+          ),
+          tags$li(
+            tags$strong("Reproducibility"),
+            " \u2014 Packages with active maintenance",
+            "are more likely to stay on CRAN,",
+            "get timely bug fixes, and remain",
+            "compatible with new R versions."
+          ),
+          tags$li(
+            tags$strong("Team projects"),
+            " \u2014 When onboarding contributors,",
+            "widely-adopted packages with strong",
+            "documentation reduce the learning",
+            "curve. Niche or abandoned packages",
+            "increase it."
+          ),
+          tags$li(
+            tags$strong("CRAN submissions"),
+            " \u2014 If you are building a package",
+            "for CRAN, your dependencies are part",
+            "of your submission. Depending on",
+            "archived or fragile packages can",
+            "delay acceptance."
+          )
+        ),
+
+        h5("What to Look For"),
+        p(
+          "No single metric tells the whole story.",
+          "Use the Explorer tab to build a",
+          "complete picture:"
+        ),
+        tags$ul(
+          tags$li(
+            tags$strong("Download trend"),
+            " \u2014 A steady or growing download",
+            "curve suggests an active user base.",
+            "A sharp decline may signal that",
+            "users are migrating to an alternative."
+          ),
+          tags$li(
+            tags$strong("Recency of updates"),
+            " \u2014 Check when the last version was",
+            "published. Some stable packages",
+            "legitimately go years without updates,",
+            "but a long gap combined with open",
+            "issues is a red flag."
+          ),
+          tags$li(
+            tags$strong("Reverse dependencies"),
+            " \u2014 Packages depended on by many",
+            "others have strong ecosystem",
+            "incentives to stay maintained.",
+            "A package with hundreds of reverse",
+            "dependencies is unlikely to be",
+            "abandoned quietly."
+          ),
+          tags$li(
+            tags$strong("Version history"),
+            " \u2014 A long, consistent release",
+            "history signals maturity.",
+            "A single release followed by silence",
+            "may indicate an experiment that was",
+            "never fully supported."
+          ),
+          tags$li(
+            tags$strong("The Compare tab"),
+            " \u2014 When choosing between packages",
+            "that solve the same problem",
+            "(e.g. dplyr vs data.table), compare",
+            "them side-by-side on downloads,",
+            "viability score, and release activity",
+            "to make an informed decision."
+          )
+        ),
+
+        h5("Viability Score"),
+        p(
+          "The viability score (0\u2013100)",
+          "is a weighted composite that",
+          "summarises five dimensions into a",
+          "single number. It is a starting point",
+          "for evaluation, not a definitive",
+          "judgement \u2014 context always matters."
+        ),
+        tags$table(
+          class = "table table-sm",
+          tags$thead(
+            tags$tr(
+              tags$th("Factor"),
+              tags$th("Weight"),
+              tags$th("What it measures")
+            )
+          ),
+          tags$tbody(
+            tags$tr(
+              tags$td("Recency"),
+              tags$td("30%"),
+              tags$td(
+                "How recently the package",
+                "was updated on CRAN"
+              )
+            ),
+            tags$tr(
+              tags$td("Download momentum"),
+              tags$td("25%"),
+              tags$td(
+                "Whether downloads are growing,",
+                "stable, or declining"
+              )
+            ),
+            tags$tr(
+              tags$td("Download volume"),
+              tags$td("20%"),
+              tags$td(
+                "Absolute number of monthly",
+                "downloads"
+              )
+            ),
+            tags$tr(
+              tags$td("Ecosystem adoption"),
+              tags$td("15%"),
+              tags$td(
+                "Number of other packages that",
+                "depend on it"
+              )
+            ),
+            tags$tr(
+              tags$td("Maturity"),
+              tags$td("10%"),
+              tags$td(
+                "Total number of releases",
+                "over the package's lifetime"
+              )
+            )
+          )
+        ),
+
         h5("Data Sources"),
         tags$ul(
           tags$li(
@@ -372,7 +542,8 @@ ui <- page_navbar(
               href = "https://crandb.r-pkg.org",
               "crandb"
             ),
-            " \u2014 Package metadata and version history"
+            " \u2014 Package metadata",
+            "and version history"
           ),
           tags$li(
             tags$a(
@@ -387,33 +558,6 @@ ui <- page_navbar(
               "R package search"
             ),
             " \u2014 Full-text package search"
-          )
-        ),
-        h5("Viability Score"),
-        p(
-          "The viability score (0\u2013100)",
-          "is a composite indicator based on:"
-        ),
-        tags$ul(
-          tags$li(
-            tags$strong("Recency"),
-            " \u2014 How recently updated (30%)"
-          ),
-          tags$li(
-            tags$strong("Download momentum"),
-            " \u2014 Growing or declining (25%)"
-          ),
-          tags$li(
-            tags$strong("Download volume"),
-            " \u2014 Monthly downloads (20%)"
-          ),
-          tags$li(
-            tags$strong("Ecosystem adoption"),
-            " \u2014 Reverse dependencies (15%)"
-          ),
-          tags$li(
-            tags$strong("Maturity"),
-            " \u2014 Releases over time (10%)"
           )
         ),
         hr(),

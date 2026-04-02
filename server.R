@@ -233,27 +233,88 @@ server <- function(input, output, session) {
   # Download trend plot
   output$download_trend_plot <- renderPlotly({
     req(rv$downloads_daily)
+    req(input$trend_series)
     df <- rv$downloads_daily
+    selected <- input$trend_series
 
-    # Aggregate to weekly for smoother trend
+    # Aggregate to weekly
     df$week <- as.Date(cut(df$date, "week"))
     weekly <- aggregate(
       count ~ week, data = df, FUN = sum
     )
 
-    plot_ly(
-      weekly,
-      x = ~week, y = ~count,
-      type = "scatter", mode = "lines",
-      fill = "tozeroy",
-      line = list(color = "#2c3e50"),
-      fillcolor = "rgba(44, 62, 80, 0.1)"
-    ) |>
+    p <- plot_ly()
+
+    if ("weekly" %in% selected) {
+      p <- p |>
+        add_trace(
+          data = weekly,
+          x = ~week, y = ~count,
+          type = "scatter", mode = "lines",
+          name = "Weekly",
+          fill = "tozeroy",
+          line = list(color = "#2c3e50"),
+          fillcolor = "rgba(44, 62, 80, 0.1)"
+        )
+    }
+
+    if ("cumulative" %in% selected) {
+      weekly$cumulative <- cumsum(weekly$count)
+      p <- p |>
+        add_trace(
+          data = weekly,
+          x = ~week, y = ~cumulative,
+          type = "scatter", mode = "lines",
+          name = "Cumulative",
+          yaxis = "y2",
+          line = list(
+            color = "#e74c3c", dash = "dot"
+          )
+        )
+    }
+
+    if ("rolling_avg" %in% selected) {
+      n <- nrow(weekly)
+      weekly$rolling <- vapply(
+        seq_len(n),
+        function(i) {
+          start <- max(1, i - 3)
+          mean(weekly$count[start:i])
+        },
+        numeric(1)
+      )
+      p <- p |>
+        add_trace(
+          data = weekly,
+          x = ~week, y = ~rolling,
+          type = "scatter", mode = "lines",
+          name = "4-Wk Avg",
+          line = list(
+            color = "#27ae60", width = 2,
+            dash = "dash"
+          )
+        )
+    }
+
+    # Add second y-axis if cumulative is shown
+    y2 <- if ("cumulative" %in% selected) {
+      list(
+        title = "Cumulative",
+        overlaying = "y", side = "right",
+        showgrid = FALSE
+      )
+    }
+
+    p |>
       layout(
         xaxis = list(title = ""),
-        yaxis = list(title = "Weekly Downloads"),
+        yaxis = list(title = "Downloads"),
+        yaxis2 = y2,
         hovermode = "x unified",
-        margin = list(t = 10)
+        margin = list(t = 10),
+        legend = list(
+          orientation = "h", y = -0.15
+        )
       ) |>
       config(displayModeBar = FALSE)
   })

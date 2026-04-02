@@ -2,13 +2,13 @@
 
 An interactive dashboard for evaluating CRAN packages before adding them to your project. Choosing the right dependencies is one of the most consequential decisions in any R project — a package that loses its maintainer, stops getting updates, or has a shrinking user base can become a liability that is expensive to replace later.
 
-cranExploreR pulls live data from CRAN APIs to give you download statistics, maintenance health, dependency information, version history, and a composite viability score — all in one place.
+cranExploreR pulls live data from CRAN APIs to give you download statistics, maintenance health, dependency information, version history, and a composite viability score.
 
 ## Features
 
 ### Explorer
 
-- **Search** CRAN packages by name or keyword with server-side search (Enter key supported)
+- **Search** CRAN packages by name or keyword with server-side search
 - **Download stats** — yesterday, past 7 days, past 30 days, and past 365 days with auto-scaling display
 - **Download trend chart** — 12-month weekly downloads with toggleable overlays:
   - Weekly totals (default)

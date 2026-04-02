@@ -106,7 +106,7 @@ ui <- page_navbar(
                 choices = c(
                   "Weekly" = "weekly",
                   "Cumulative" = "cumulative",
-                  "4-Wk Avg" = "rolling_avg"
+                  "Average" = "average"
                 ),
                 selected = "weekly",
                 inline = TRUE

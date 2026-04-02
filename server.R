@@ -266,29 +266,25 @@ server <- function(input, output, session) {
           x = ~week, y = ~cumulative,
           type = "scatter", mode = "lines",
           name = "Cumulative",
-          yaxis = "y2",
           line = list(
             color = "#e74c3c", dash = "dot"
           )
         )
     }
 
-    if ("rolling_avg" %in% selected) {
-      n <- nrow(weekly)
-      weekly$rolling <- vapply(
-        seq_len(n),
-        function(i) {
-          start <- max(1, i - 3)
-          mean(weekly$count[start:i])
-        },
-        numeric(1)
-      )
+    if ("average" %in% selected) {
+      avg_val <- mean(weekly$count)
       p <- p |>
         add_trace(
           data = weekly,
-          x = ~week, y = ~rolling,
+          x = ~week,
+          y = rep(avg_val, nrow(weekly)),
           type = "scatter", mode = "lines",
-          name = "4-Wk Avg",
+          name = paste0(
+            "Avg (", format_number(
+              round(avg_val)
+            ), "/wk)"
+          ),
           line = list(
             color = "#27ae60", width = 2,
             dash = "dash"
@@ -296,20 +292,10 @@ server <- function(input, output, session) {
         )
     }
 
-    # Add second y-axis if cumulative is shown
-    y2 <- if ("cumulative" %in% selected) {
-      list(
-        title = "Cumulative",
-        overlaying = "y", side = "right",
-        showgrid = FALSE
-      )
-    }
-
     p |>
       layout(
         xaxis = list(title = ""),
         yaxis = list(title = "Downloads"),
-        yaxis2 = y2,
         hovermode = "x unified",
         margin = list(t = 10),
         legend = list(
@@ -397,6 +383,34 @@ server <- function(input, output, session) {
       "<.*>", "", meta$Maintainer %||% "Unknown"
     )
 
+    # Fetch lifetime total downloads
+    lifetime_dl <- "N/A"
+    if (!is.null(first_published)) {
+      lifetime <- tryCatch({
+        url <- paste0(
+          "https://cranlogs.r-pkg.org/",
+          "downloads/total/",
+          first_published, ":",
+          Sys.Date() - 1, "/", meta$Package
+        )
+        resp <- httr2::request(url) |>
+          httr2::req_timeout(10) |>
+          httr2::req_perform()
+        data <- jsonlite::fromJSON(
+          httr2::resp_body_string(resp),
+          simplifyVector = TRUE
+        )
+        dl <- data$downloads
+        if (is.list(dl) && !is.data.frame(dl)) {
+          dl <- dl[[1]]
+        }
+        if (is.numeric(dl)) dl else as.numeric(dl)
+      }, error = function(e) NA)
+      if (!is.na(lifetime)) {
+        lifetime_dl <- format_number(lifetime)
+      }
+    }
+
     # Build links list
     links <- list()
     links[["CRAN"]] <- paste0(
@@ -453,6 +467,7 @@ server <- function(input, output, session) {
         first_published %||% "Unknown",
       "Last Published" =
         last_published %||% "Unknown",
+      "Lifetime Downloads" = lifetime_dl,
       "R Version Required" =
         meta$Depends$R %||% "Not specified",
       "NeedsCompilation" =

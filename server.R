@@ -213,6 +213,20 @@ server <- function(input, output, session) {
   })
 
   # Download value boxes
+  output$dl_day_title <- renderUI({
+    yesterday <- Sys.Date() - 1
+    tags$span(
+      "Yesterday",
+      tags$br(),
+      tags$small(
+        paste0(
+          format(yesterday, "%d %b %Y"),
+          " UTC"
+        ),
+        class = "fw-normal"
+      )
+    )
+  })
   output$dl_day <- renderText({
     req(rv$download_totals)
     format_number(rv$download_totals$last_day)
@@ -273,12 +287,16 @@ server <- function(input, output, session) {
     }
 
     if ("average" %in% selected) {
-      avg_val <- mean(weekly$count)
+      avg_val <- round(mean(weekly$count))
       p <- p |>
         add_trace(
           data = weekly,
           x = ~week,
           y = rep(avg_val, nrow(weekly)),
+          hovertemplate = paste0(
+            format_number(avg_val),
+            "<extra></extra>"
+          ),
           type = "scatter", mode = "lines",
           name = paste0(
             "Avg (", format_number(

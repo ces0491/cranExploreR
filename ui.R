@@ -65,7 +65,7 @@ ui <- page_navbar(
           col_widths = c(3, 3, 3, 3),
           fill = FALSE,
           value_box(
-            title = "Yesterday",
+            title = uiOutput("dl_day_title"),
             value = textOutput("dl_day"),
             showcase = icon("calendar-day"),
             theme = "primary"

@@ -70,21 +70,37 @@ calculate_health_score <- function(
 
       if (days_since <= 90) {
         score <- score + 30
-        details$recency <- "Updated within last 3 months"
+        details$recency <- list(
+          text = "Updated within last 3 months",
+          sentiment = "good"
+        )
       } else if (days_since <= 180) {
         score <- score + 25
-        details$recency <- "Updated within last 6 months"
+        details$recency <- list(
+          text = "Updated within last 6 months",
+          sentiment = "good"
+        )
       } else if (days_since <= 365) {
         score <- score + 18
-        details$recency <- "Updated within last year"
+        details$recency <- list(
+          text = "Updated within last year",
+          sentiment = "neutral"
+        )
       } else if (days_since <= 730) {
         score <- score + 10
-        details$recency <- "Updated within last 2 years"
+        details$recency <- list(
+          text = "Updated within last 2 years",
+          sentiment = "warn"
+        )
       } else {
         score <- score + 3
-        details$recency <- paste0(
-          "Last updated ",
-          round(days_since / 365, 1), " years ago"
+        details$recency <- list(
+          text = paste0(
+            "Last updated ",
+            round(days_since / 365, 1),
+            " years ago"
+          ),
+          sentiment = "bad"
         )
       }
     }
@@ -100,16 +116,28 @@ calculate_health_score <- function(
       momentum <- monthly / monthly_avg
       if (momentum >= 1.1) {
         score <- score + 25
-        details$momentum <- "Downloads trending up"
+        details$momentum <- list(
+          text = "Downloads trending up",
+          sentiment = "good"
+        )
       } else if (momentum >= 0.9) {
         score <- score + 20
-        details$momentum <- "Downloads stable"
+        details$momentum <- list(
+          text = "Downloads stable",
+          sentiment = "good"
+        )
       } else if (momentum >= 0.7) {
         score <- score + 12
-        details$momentum <- "Downloads slightly declining"
+        details$momentum <- list(
+          text = "Downloads slightly declining",
+          sentiment = "warn"
+        )
       } else {
         score <- score + 5
-        details$momentum <- "Downloads declining"
+        details$momentum <- list(
+          text = "Downloads declining",
+          sentiment = "bad"
+        )
       }
     }
   }
@@ -119,19 +147,34 @@ calculate_health_score <- function(
   if (!is.na(monthly)) {
     if (monthly >= 100000) {
       score <- score + 20
-      details$volume <- "Very high download volume"
+      details$volume <- list(
+        text = "Very high download volume",
+        sentiment = "good"
+      )
     } else if (monthly >= 10000) {
       score <- score + 16
-      details$volume <- "High download volume"
+      details$volume <- list(
+        text = "High download volume",
+        sentiment = "good"
+      )
     } else if (monthly >= 1000) {
       score <- score + 12
-      details$volume <- "Moderate download volume"
+      details$volume <- list(
+        text = "Moderate download volume",
+        sentiment = "neutral"
+      )
     } else if (monthly >= 100) {
       score <- score + 6
-      details$volume <- "Low download volume"
+      details$volume <- list(
+        text = "Low download volume",
+        sentiment = "warn"
+      )
     } else {
       score <- score + 2
-      details$volume <- "Very low download volume"
+      details$volume <- list(
+        text = "Very low download volume",
+        sentiment = "bad"
+      )
     }
   }
 
@@ -140,28 +183,43 @@ calculate_health_score <- function(
   rev_total <- rev_deps$total
   if (rev_total >= 100) {
     score <- score + 15
-    details$ecosystem <- paste0(
-      rev_total, " reverse dependencies",
-      " \u2014 core ecosystem package"
+    details$ecosystem <- list(
+      text = paste0(
+        rev_total, " reverse dependencies",
+        " \u2014 core ecosystem package"
+      ),
+      sentiment = "good"
     )
   } else if (rev_total >= 20) {
     score <- score + 12
-    details$ecosystem <- paste0(
-      rev_total,
-      " reverse dependencies \u2014 well-established"
+    details$ecosystem <- list(
+      text = paste0(
+        rev_total, " reverse dependencies",
+        " \u2014 well-established"
+      ),
+      sentiment = "good"
     )
   } else if (rev_total >= 5) {
     score <- score + 8
-    details$ecosystem <- paste0(
-      rev_total, " reverse dependencies"
+    details$ecosystem <- list(
+      text = paste0(
+        rev_total, " reverse dependencies"
+      ),
+      sentiment = "neutral"
     )
   } else if (rev_total >= 1) {
     score <- score + 4
-    details$ecosystem <- paste0(
-      rev_total, " reverse dependency"
+    details$ecosystem <- list(
+      text = paste0(
+        rev_total, " reverse dependency"
+      ),
+      sentiment = "warn"
     )
   } else {
-    details$ecosystem <- "No reverse dependencies"
+    details$ecosystem <- list(
+      text = "No reverse dependencies",
+      sentiment = "bad"
+    )
   }
 
   # 5. Version maturity (max 10 points)
@@ -170,20 +228,34 @@ calculate_health_score <- function(
     n_versions <- length(versions_data$versions)
     if (n_versions >= 10) {
       score <- score + 10
-      details$maturity <- paste0(
-        n_versions, " releases \u2014 mature package"
+      details$maturity <- list(
+        text = paste0(
+          n_versions,
+          " releases \u2014 mature package"
+        ),
+        sentiment = "good"
       )
     } else if (n_versions >= 5) {
       score <- score + 7
-      details$maturity <- paste0(n_versions, " releases")
+      details$maturity <- list(
+        text = paste0(n_versions, " releases"),
+        sentiment = "neutral"
+      )
     } else if (n_versions >= 2) {
       score <- score + 4
-      details$maturity <- paste0(
-        n_versions, " releases \u2014 relatively new"
+      details$maturity <- list(
+        text = paste0(
+          n_versions,
+          " releases \u2014 relatively new"
+        ),
+        sentiment = "warn"
       )
     } else {
       score <- score + 1
-      details$maturity <- "Single release"
+      details$maturity <- list(
+        text = "Single release",
+        sentiment = "warn"
+      )
     }
   }
 

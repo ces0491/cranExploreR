@@ -294,8 +294,9 @@ server <- function(input, output, session) {
           x = ~week,
           y = rep(avg_val, nrow(weekly)),
           hovertemplate = paste0(
+            "Avg: ",
             format_number(avg_val),
-            "<extra></extra>"
+            "/wk<extra></extra>"
           ),
           type = "scatter", mode = "lines",
           name = paste0(
@@ -366,12 +367,31 @@ server <- function(input, output, session) {
     tags$ul(
       class = "list-unstyled small",
       lapply(names(details), function(key) {
-        tags$li(
-          icon(
-            "circle-check",
-            class = "text-muted me-1"
+        item <- details[[key]]
+        ico_map <- list(
+          good = list(
+            name = "circle-check",
+            cls = "text-success me-1"
           ),
-          details[[key]]
+          neutral = list(
+            name = "circle-info",
+            cls = "text-muted me-1"
+          ),
+          warn = list(
+            name = "triangle-exclamation",
+            cls = "text-warning me-1"
+          ),
+          bad = list(
+            name = "circle-xmark",
+            cls = "text-danger me-1"
+          )
+        )
+        ico <- ico_map[[
+          item$sentiment %||% "neutral"
+        ]]
+        tags$li(
+          icon(ico$name, class = ico$cls),
+          item$text
         )
       })
     )

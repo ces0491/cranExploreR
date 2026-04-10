@@ -106,7 +106,8 @@ ui <- page_navbar(
                 choices = c(
                   "Weekly" = "weekly",
                   "Cumulative" = "cumulative",
-                  "Average" = "average"
+                  "Average" = "average",
+                  "Versions" = "versions"
                 ),
                 selected = "weekly",
                 inline = TRUE
@@ -127,6 +128,13 @@ ui <- page_navbar(
               hr(),
               uiOutput("health_details")
             )
+          )
+        ),
+
+        card(
+          card_header("Download Statistics"),
+          card_body(
+            uiOutput("download_stats_ui")
           )
         ),
 
@@ -563,7 +571,15 @@ ui <- page_navbar(
         hr(),
         p(
           class = "text-muted",
-          "Built with R, Shiny, and bslib."
+          "Built with R, Shiny, and bslib by",
+          tags$a(
+            href = paste0(
+              "https://www.linkedin.com/in/",
+              "cesaire-tobias-5555a274/"
+            ),
+            target = "_blank",
+            "Cesaire Tobias"
+          )
         )
       )
     )

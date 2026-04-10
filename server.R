@@ -156,7 +156,7 @@ server <- function(input, output, session) {
 
     homepage_link <- NULL
     if (!is.null(meta$URL) && nchar(meta$URL) > 0) {
-      first_url <- strsplit(meta$URL, "[,\\s]+")[[1]][1]
+      first_url <- strsplit(meta$URL, "[,\n]+")[[1]][1]
       homepage_link <- tags$a(
         href = first_url,
         icon("link"), "Homepage",
@@ -259,7 +259,10 @@ server <- function(input, output, session) {
 
     p <- plot_ly()
 
-    if ("weekly" %in% selected) {
+    show_versions <- "versions" %in% selected &&
+      !is.null(rv$versions$timeline)
+
+    if ("weekly" %in% selected && !show_versions) {
       p <- p |>
         add_trace(
           data = weekly,
@@ -270,6 +273,102 @@ server <- function(input, output, session) {
           line = list(color = "#2c3e50"),
           fillcolor = "rgba(44, 62, 80, 0.1)"
         )
+    }
+
+    if ("weekly" %in% selected && show_versions) {
+      # Map each week to the current version
+      timeline <- rv$versions$timeline
+      ver_names <- names(timeline)
+      ver_dates <- as.Date(
+        substr(unlist(timeline), 1, 10)
+      )
+      ver_df <- data.frame(
+        version = ver_names,
+        date = ver_dates,
+        stringsAsFactors = FALSE
+      )
+      ver_df <- ver_df[order(ver_df$date), ]
+
+      # Assign version to each week
+      weekly$version <- vapply(
+        weekly$week,
+        function(w) {
+          idx <- which(ver_df$date <= w)
+          if (length(idx) == 0) {
+            ver_df$version[1]
+          } else {
+            ver_df$version[max(idx)]
+          }
+        },
+        character(1)
+      )
+
+      # Color palette for versions
+      ver_colors <- c(
+        "#2c3e50", "#e74c3c", "#27ae60",
+        "#8e44ad", "#f39c12", "#1abc9c",
+        "#d35400", "#2980b9", "#c0392b"
+      )
+      unique_vers <- unique(weekly$version)
+
+      for (i in seq_along(unique_vers)) {
+        v <- unique_vers[i]
+        seg <- weekly[weekly$version == v, ]
+        col <- ver_colors[
+          ((i - 1) %% length(ver_colors)) + 1
+        ]
+
+        p <- p |>
+          add_trace(
+            data = seg,
+            x = ~week, y = ~count,
+            type = "scatter", mode = "lines",
+            name = paste0("v", v),
+            fill = "tozeroy",
+            line = list(color = col),
+            fillcolor = paste0(
+              "rgba(",
+              paste(
+                col2rgb(col), collapse = ", "
+              ),
+              ", 0.1)"
+            )
+          )
+      }
+    }
+
+    if (show_versions && !("weekly" %in% selected)) {
+      # Show version markers even without weekly
+      timeline <- rv$versions$timeline
+      ver_dates <- as.Date(
+        substr(unlist(timeline), 1, 10)
+      )
+      min_date <- min(weekly$week)
+      max_date <- max(weekly$week)
+      ver_in_range <- ver_dates[
+        ver_dates >= min_date &
+          ver_dates <= max_date
+      ]
+      ver_names_in <- names(timeline)[
+        ver_dates >= min_date &
+          ver_dates <= max_date
+      ]
+
+      for (i in seq_along(ver_in_range)) {
+        p <- p |>
+          add_segments(
+            x = ver_in_range[i],
+            xend = ver_in_range[i],
+            y = 0,
+            yend = max(weekly$count, na.rm = TRUE),
+            line = list(
+              color = "grey", dash = "dot",
+              width = 1
+            ),
+            name = paste0("v", ver_names_in[i]),
+            showlegend = TRUE
+          )
+      }
     }
 
     if ("cumulative" %in% selected) {
@@ -397,6 +496,145 @@ server <- function(input, output, session) {
     )
   })
 
+  # Download statistics
+  output$download_stats_ui <- renderUI({
+    req(rv$downloads_daily)
+    req(rv$download_totals)
+    req(rv$metadata)
+    df <- rv$downloads_daily
+    meta <- rv$metadata
+
+    # Lifetime total
+    first_pub <- NULL
+    if (!is.null(rv$versions$timeline)) {
+      all_dates <- as.Date(
+        substr(unlist(rv$versions$timeline), 1, 10)
+      )
+      first_pub <- min(all_dates, na.rm = TRUE)
+    }
+
+    lifetime_dl <- "N/A"
+    if (!is.null(first_pub)) {
+      lifetime <- tryCatch({
+        url <- paste0(
+          "https://cranlogs.r-pkg.org/",
+          "downloads/total/",
+          first_pub, ":",
+          Sys.Date() - 1, "/", meta$Package
+        )
+        resp <- httr2::request(url) |>
+          httr2::req_timeout(10) |>
+          httr2::req_perform()
+        data <- jsonlite::fromJSON(
+          httr2::resp_body_string(resp),
+          simplifyVector = TRUE
+        )
+        dl <- data$downloads
+        if (is.list(dl) && !is.data.frame(dl)) {
+          dl <- dl[[1]]
+        }
+        if (is.numeric(dl)) dl else as.numeric(dl)
+      }, error = function(e) NA)
+      if (!is.na(lifetime)) {
+        lifetime_dl <- format_number(lifetime)
+      }
+    }
+
+    # Peak day
+    peak_idx <- which.max(df$count)
+    peak_count <- format_number(df$count[peak_idx])
+    peak_date <- format(df$date[peak_idx], "%d %b %Y")
+
+    # Average daily downloads (over available data)
+    avg_daily <- format_number(
+      round(mean(df$count))
+    )
+
+    # Aggregate weekly for weekly stats
+    df$week <- as.Date(cut(df$date, "week"))
+    weekly <- aggregate(
+      count ~ week, data = df, FUN = sum
+    )
+
+    # Peak week
+    peak_wk_idx <- which.max(weekly$count)
+    peak_wk_count <- format_number(
+      weekly$count[peak_wk_idx]
+    )
+    peak_wk_date <- format(
+      weekly$week[peak_wk_idx], "%d %b %Y"
+    )
+
+    # Average weekly
+    avg_weekly <- format_number(
+      round(mean(weekly$count))
+    )
+
+    # Days on CRAN
+    days_on_cran <- if (!is.null(first_pub)) {
+      as.numeric(Sys.Date() - first_pub)
+    } else {
+      NA
+    }
+    days_label <- if (!is.na(days_on_cran)) {
+      paste0(
+        format_number(days_on_cran), " days",
+        " (since ", format(first_pub, "%d %b %Y"),
+        ")"
+      )
+    } else {
+      "Unknown"
+    }
+
+    stat_row <- function(label, value) {
+      tags$tr(
+        tags$td(
+          tags$strong(label),
+          style = "white-space: nowrap;"
+        ),
+        tags$td(value)
+      )
+    }
+
+    layout_columns(
+      col_widths = c(6, 6),
+
+      tags$table(
+        class = "table table-sm mb-0",
+        tags$tbody(
+          stat_row(
+            "Lifetime Downloads", lifetime_dl
+          ),
+          stat_row("Days on CRAN", days_label),
+          stat_row(
+            "Daily Average (past year)", avg_daily
+          ),
+          stat_row(
+            "Weekly Average (past year)",
+            avg_weekly
+          )
+        )
+      ),
+
+      tags$table(
+        class = "table table-sm mb-0",
+        tags$tbody(
+          stat_row(
+            "Peak Day",
+            paste0(peak_count, " (", peak_date, ")")
+          ),
+          stat_row(
+            "Peak Week",
+            paste0(
+              peak_wk_count,
+              " (w/c ", peak_wk_date, ")"
+            )
+          )
+        )
+      )
+    )
+  })
+
   # Metadata table
   output$metadata_table <- renderUI({
     req(rv$metadata)
@@ -421,34 +659,6 @@ server <- function(input, output, session) {
       "<.*>", "", meta$Maintainer %||% "Unknown"
     )
 
-    # Fetch lifetime total downloads
-    lifetime_dl <- "N/A"
-    if (!is.null(first_published)) {
-      lifetime <- tryCatch({
-        url <- paste0(
-          "https://cranlogs.r-pkg.org/",
-          "downloads/total/",
-          first_published, ":",
-          Sys.Date() - 1, "/", meta$Package
-        )
-        resp <- httr2::request(url) |>
-          httr2::req_timeout(10) |>
-          httr2::req_perform()
-        data <- jsonlite::fromJSON(
-          httr2::resp_body_string(resp),
-          simplifyVector = TRUE
-        )
-        dl <- data$downloads
-        if (is.list(dl) && !is.data.frame(dl)) {
-          dl <- dl[[1]]
-        }
-        if (is.numeric(dl)) dl else as.numeric(dl)
-      }, error = function(e) NA)
-      if (!is.na(lifetime)) {
-        lifetime_dl <- format_number(lifetime)
-      }
-    }
-
     # Build links list
     links <- list()
     links[["CRAN"]] <- paste0(
@@ -461,7 +671,7 @@ server <- function(input, output, session) {
     )
     if (!is.null(meta$URL) && nchar(meta$URL) > 0) {
       urls <- trimws(
-        strsplit(meta$URL, "[,\\s]+")[[1]]
+        strsplit(meta$URL, "[,\n]+")[[1]]
       )
       for (u in urls) {
         if (grepl("github\\.com", u, TRUE)) {
@@ -505,7 +715,6 @@ server <- function(input, output, session) {
         first_published %||% "Unknown",
       "Last Published" =
         last_published %||% "Unknown",
-      "Lifetime Downloads" = lifetime_dl,
       "R Version Required" =
         meta$Depends$R %||% "Not specified",
       "NeedsCompilation" =

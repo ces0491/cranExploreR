@@ -133,6 +133,36 @@ fetch_download_totals <- function(pkg_name) {
   )
 }
 
+#' Fetch lifetime total downloads
+#' @param pkg_name Character, package name
+#' @param first_published Date, first publication date
+#' @return Numeric total or NA on failure
+fetch_lifetime_downloads <- function(
+  pkg_name, first_published
+) {
+  tryCatch({
+    url <- paste0(
+      "https://cranlogs.r-pkg.org/downloads/total/",
+      first_published, ":",
+      Sys.Date() - 1, "/", pkg_name
+    )
+    resp <- request(url) |>
+      req_timeout(10) |>
+      req_perform()
+
+    data <- fromJSON(
+      resp_body_string(resp), simplifyVector = TRUE
+    )
+    dl <- data$downloads
+    if (is.list(dl) && !is.data.frame(dl)) {
+      dl <- dl[[1]]
+    }
+    if (is.numeric(dl)) dl else as.numeric(dl)
+  }, error = function(e) {
+    NA_real_
+  })
+}
+
 #' Fetch reverse dependencies count from crandb
 #' @param pkg_name Character, package name
 #' @return List with reverse dependency counts

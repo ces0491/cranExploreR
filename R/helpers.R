@@ -23,8 +23,10 @@ BROWSE_CATEGORIES <- c(
 
 #' Format large numbers with commas
 format_number <- function(x) {
-  if (is.na(x) || is.null(x)) return("N/A")
-  formatC(x, format = "d", big.mark = ",")
+  if (is.null(x) || length(x) == 0 || is.na(x)) {
+    return("N/A")
+  }
+  formatC(round(x), format = "f", digits = 0, big.mark = ",")
 }
 
 #' Build an HTML links string for a package
@@ -108,8 +110,16 @@ calculate_health_score <- function(
 
   # 2. Download momentum (max 25 points)
   max_score <- max_score + 25
-  monthly <- download_totals$last_month
-  yearly <- download_totals$last_year
+  monthly <- if (!is.null(download_totals)) {
+    download_totals$last_month
+  } else {
+    NA
+  }
+  yearly <- if (!is.null(download_totals)) {
+    download_totals$last_year
+  } else {
+    NA
+  }
   if (!is.na(monthly) && !is.na(yearly) && yearly > 0) {
     monthly_avg <- yearly / 12
     if (monthly_avg > 0) {
@@ -144,7 +154,7 @@ calculate_health_score <- function(
 
   # 3. Download volume (max 20 points)
   max_score <- max_score + 20
-  if (!is.na(monthly)) {
+  if (!is.null(monthly) && !is.na(monthly)) {
     if (monthly >= 100000) {
       score <- score + 20
       details$volume <- list(
@@ -180,7 +190,11 @@ calculate_health_score <- function(
 
   # 4. Reverse dependencies (max 15 points)
   max_score <- max_score + 15
-  rev_total <- rev_deps$total
+  rev_total <- if (!is.null(rev_deps)) {
+    rev_deps$total
+  } else {
+    0
+  }
   if (rev_total >= 100) {
     score <- score + 15
     details$ecosystem <- list(

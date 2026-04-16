@@ -11,13 +11,17 @@ server <- function(input, output, session) {
     versions = NULL,
     downloads_daily = NULL,
     download_totals = NULL,
+    lifetime_downloads = NA_real_,
     rev_deps = NULL,
     health = NULL,
-    compare_data = NULL
+    search_results = NULL,
+    browse_results = NULL,
+    browse_label = NULL,
+    compare_data = NULL,
+    compare_search_results = NULL
   )
 
   # --- Search ---
-  rv$search_results <- NULL
 
   observeEvent(input$search_btn, {
     req(nchar(trimws(input$search_query)) > 0)
@@ -47,42 +51,36 @@ server <- function(input, output, session) {
       class = "list-group",
       lapply(seq_len(nrow(results)), function(i) {
         pkg <- results$package[i]
-        actionLink(
-          inputId = paste0("select_pkg_", i),
-          label = tags$div(
-            class = paste(
-              "list-group-item",
-              "list-group-item-action p-2"
+        tags$div(
+          class = paste(
+            "list-group-item",
+            "list-group-item-action p-2"
+          ),
+          style = "cursor: pointer;",
+          onclick = sprintf(
+            paste0(
+              "Shiny.setInputValue('select_pkg',",
+              " '%s', {priority: 'event'})"
             ),
-            tags$strong(pkg),
-            tags$span(
-              paste0(" v", results$version[i]),
-              class = "text-muted small"
-            ),
-            tags$br(),
-            tags$small(
-              results$title[i],
-              class = "text-muted"
-            )
+            pkg
+          ),
+          tags$strong(pkg),
+          tags$span(
+            paste0(" v", results$version[i]),
+            class = "text-muted small"
+          ),
+          tags$br(),
+          tags$small(
+            results$title[i],
+            class = "text-muted"
           )
         )
       })
     )
   })
 
-  observe({
-    results <- rv$search_results
-    req(results)
-
-    lapply(seq_len(nrow(results)), function(i) {
-      observeEvent(
-        input[[paste0("select_pkg_", i)]],
-        {
-          load_package(results$package[i])
-        },
-        ignoreInit = TRUE
-      )
-    })
+  observeEvent(input$select_pkg, {
+    load_package(input$select_pkg)
   })
 
   # Core function to load all package data
@@ -104,31 +102,69 @@ server <- function(input, output, session) {
         rv$selected_pkg <- pkg_name
 
         incProgress(
-          0.2, detail = "Fetching version history"
+          0.15, detail = "Fetching version history"
         )
         rv$versions <- fetch_package_versions(pkg_name)
 
         incProgress(
-          0.2, detail = "Fetching download stats"
+          0.15, detail = "Fetching download stats"
         )
         rv$download_totals <- fetch_download_totals(
           pkg_name
         )
 
         incProgress(
-          0.2, detail = "Fetching daily downloads"
+          0.15, detail = "Fetching daily downloads"
         )
         rv$downloads_daily <- fetch_daily_downloads(
           pkg_name
         )
 
         incProgress(
-          0.2, detail = "Fetching reverse dependencies"
+          0.15, detail = "Fetching lifetime downloads"
+        )
+        rv$lifetime_downloads <- NA_real_
+        if (!is.null(rv$versions$timeline)) {
+          first_pub <- min(as.Date(
+            substr(
+              unlist(rv$versions$timeline), 1, 10
+            )
+          ), na.rm = TRUE)
+          rv$lifetime_downloads <-
+            fetch_lifetime_downloads(
+              pkg_name, first_pub
+            )
+        }
+
+        incProgress(
+          0.15, detail = "Fetching reverse dependencies"
         )
         rv$rev_deps <- fetch_reverse_deps(pkg_name)
 
+        # Notify on partial failures
+        failures <- c()
+        if (is.null(rv$versions)) {
+          failures <- c(failures, "version history")
+        }
+        if (is.null(rv$downloads_daily)) {
+          failures <- c(failures, "daily downloads")
+        }
+        if (is.null(rv$download_totals)) {
+          failures <- c(failures, "download totals")
+        }
+        if (length(failures) > 0) {
+          showNotification(
+            paste(
+              "Could not load:",
+              paste(failures, collapse = ", ")
+            ),
+            type = "warning",
+            duration = 5
+          )
+        }
+
         incProgress(
-          0.1, detail = "Calculating health score"
+          0.15, detail = "Calculating health score"
         )
         rv$health <- calculate_health_score(
           rv$metadata, rv$versions,
@@ -240,8 +276,10 @@ server <- function(input, output, session) {
     format_number(rv$download_totals$last_month)
   })
   output$dl_year <- renderText({
-    req(rv$download_totals)
-    format_number(rv$download_totals$last_year)
+    # Derive from daily data for consistency rather than
+    # relying on the cranlogs total endpoint which can lag
+    req(rv$downloads_daily)
+    format_number(sum(rv$downloads_daily$count, na.rm = TRUE))
   })
 
   # Download trend plot
@@ -256,6 +294,7 @@ server <- function(input, output, session) {
     weekly <- aggregate(
       count ~ week, data = df, FUN = sum
     )
+    weekly <- weekly[order(weekly$week), ]
 
     p <- plot_ly()
 
@@ -309,6 +348,7 @@ server <- function(input, output, session) {
         "#8e44ad", "#f39c12", "#1abc9c",
         "#d35400", "#2980b9", "#c0392b"
       )
+
       unique_vers <- unique(weekly$version)
 
       for (i in seq_along(unique_vers)) {
@@ -317,6 +357,18 @@ server <- function(input, output, session) {
         col <- ver_colors[
           ((i - 1) %% length(ver_colors)) + 1
         ]
+
+        # Add bridge point from previous version's last
+        # data point so lines connect across boundaries
+        if (i > 1) {
+          prev_v <- unique_vers[i - 1]
+          prev_seg <- weekly[weekly$version == prev_v, ]
+          if (nrow(prev_seg) > 0) {
+            bridge <- prev_seg[nrow(prev_seg), ]
+            bridge$version <- v
+            seg <- rbind(bridge, seg)
+          }
+        }
 
         p <- p |>
           add_trace(
@@ -499,45 +551,23 @@ server <- function(input, output, session) {
   # Download statistics
   output$download_stats_ui <- renderUI({
     req(rv$downloads_daily)
-    req(rv$download_totals)
     req(rv$metadata)
     df <- rv$downloads_daily
-    meta <- rv$metadata
 
-    # Lifetime total
+    # Lifetime total (pre-fetched in load_package)
+    lifetime_dl <- if (!is.na(rv$lifetime_downloads)) {
+      format_number(rv$lifetime_downloads)
+    } else {
+      "N/A"
+    }
+
+    # First publication date for Days on CRAN
     first_pub <- NULL
     if (!is.null(rv$versions$timeline)) {
       all_dates <- as.Date(
         substr(unlist(rv$versions$timeline), 1, 10)
       )
       first_pub <- min(all_dates, na.rm = TRUE)
-    }
-
-    lifetime_dl <- "N/A"
-    if (!is.null(first_pub)) {
-      lifetime <- tryCatch({
-        url <- paste0(
-          "https://cranlogs.r-pkg.org/",
-          "downloads/total/",
-          first_pub, ":",
-          Sys.Date() - 1, "/", meta$Package
-        )
-        resp <- httr2::request(url) |>
-          httr2::req_timeout(10) |>
-          httr2::req_perform()
-        data <- jsonlite::fromJSON(
-          httr2::resp_body_string(resp),
-          simplifyVector = TRUE
-        )
-        dl <- data$downloads
-        if (is.list(dl) && !is.data.frame(dl)) {
-          dl <- dl[[1]]
-        }
-        if (is.numeric(dl)) dl else as.numeric(dl)
-      }, error = function(e) NA)
-      if (!is.na(lifetime)) {
-        lifetime_dl <- format_number(lifetime)
-      }
     }
 
     # Peak day
@@ -825,9 +855,6 @@ server <- function(input, output, session) {
 
   # --- Browse Tab ---
 
-  rv$browse_results <- NULL
-  rv$browse_label <- NULL
-
   output$browse_has_results <- reactive({
     !is.null(rv$browse_results)
   })
@@ -941,8 +968,6 @@ server <- function(input, output, session) {
 
   # --- Compare Tab ---
 
-  rv$compare_search_results <- NULL
-
   observeEvent(input$compare_search_btn, {
     req(nchar(trimws(input$compare_search)) > 0)
     query <- trimws(input$compare_search)
@@ -968,55 +993,50 @@ server <- function(input, output, session) {
     tags$div(
       class = "list-group mb-2",
       lapply(seq_len(nrow(results)), function(i) {
-        actionLink(
-          inputId = paste0("compare_pick_", i),
-          label = tags$div(
-            class = paste(
-              "list-group-item",
-              "list-group-item-action py-1 px-2"
+        tags$div(
+          class = paste(
+            "list-group-item",
+            "list-group-item-action py-1 px-2"
+          ),
+          style = "cursor: pointer;",
+          onclick = sprintf(
+            paste0(
+              "Shiny.setInputValue(",
+              "'compare_pick_pkg', '%s',",
+              " {priority: 'event'})"
             ),
-            tags$strong(
-              results$package[i],
-              class = "small"
-            ),
-            tags$span(
-              paste0(" v", results$version[i]),
-              class = "text-muted small"
-            )
+            results$package[i]
+          ),
+          tags$strong(
+            results$package[i],
+            class = "small"
+          ),
+          tags$span(
+            paste0(" v", results$version[i]),
+            class = "text-muted small"
           )
         )
       })
     )
   })
 
-  observe({
-    results <- rv$compare_search_results
-    req(results)
-
-    lapply(seq_len(nrow(results)), function(i) {
-      observeEvent(
-        input[[paste0("compare_pick_", i)]],
-        {
-          pkg <- results$package[i]
-          # Fill next empty slot
-          if (nchar(trimws(input$compare_pkg1)) == 0) {
-            updateTextInput(
-              session, "compare_pkg1", value = pkg
-            )
-          } else if (nchar(trimws(input$compare_pkg2)) == 0) {
-            updateTextInput(
-              session, "compare_pkg2", value = pkg
-            )
-          } else {
-            updateTextInput(
-              session, "compare_pkg3", value = pkg
-            )
-          }
-          rv$compare_search_results <- NULL
-        },
-        ignoreInit = TRUE
+  observeEvent(input$compare_pick_pkg, {
+    pkg <- input$compare_pick_pkg
+    # Fill next empty slot
+    if (nchar(trimws(input$compare_pkg1)) == 0) {
+      updateTextInput(
+        session, "compare_pkg1", value = pkg
       )
-    })
+    } else if (nchar(trimws(input$compare_pkg2)) == 0) {
+      updateTextInput(
+        session, "compare_pkg2", value = pkg
+      )
+    } else {
+      updateTextInput(
+        session, "compare_pkg3", value = pkg
+      )
+    }
+    rv$compare_search_results <- NULL
   })
 
   output$comparison_loaded <- reactive({
@@ -1155,7 +1175,11 @@ server <- function(input, output, session) {
           totals$last_month
         ),
         `Yearly Downloads` = format_number(
-          totals$last_year
+          if (!is.null(item$daily)) {
+            sum(item$daily$count, na.rm = TRUE)
+          } else {
+            NA
+          }
         ),
         `Reverse Deps` = format_number(
           item$rev_deps$total

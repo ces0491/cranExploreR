@@ -21,12 +21,26 @@ BROWSE_CATEGORIES <- c(
   "Reproducibility" = "reproducible pipeline workflow"
 )
 
-#' Format large numbers with commas
+#' Format numbers with thousands separators
+#'
+#' Vectorised: a vector in gives a vector out, with "N/A" in the
+#' positions that were missing.
+#'
+#' @param x Numeric vector
+#' @return Character vector the same length as x, or "N/A" when empty
 format_number <- function(x) {
-  if (is.null(x) || length(x) == 0 || is.na(x)) {
+  if (is.null(x) || length(x) == 0) {
     return("N/A")
   }
-  formatC(round(x), format = "f", digits = 0, big.mark = ",")
+
+  out <- rep("N/A", length(x))
+  ok <- !is.na(x)
+  if (any(ok)) {
+    out[ok] <- formatC(
+      round(x[ok]), format = "f", digits = 0, big.mark = ","
+    )
+  }
+  out
 }
 
 #' Build an HTML links string for a package
@@ -53,7 +67,18 @@ package_links_html <- function(pkg_name) {
 }
 
 #' Calculate a maintenance health score (0-100)
-#' Based on recency of updates, download trends, etc.
+#'
+#' Each factor contributes to the denominator only when the data behind
+#' it arrived. A failed request therefore removes a factor rather than
+#' scoring it zero, so a network blip does not read as a judgement on the
+#' package. `weight_available` reports how much of the full 100 points of
+#' weighting the score was computed over.
+#'
+#' @param metadata List from fetch_package_metadata()
+#' @param versions_data List from fetch_package_versions()
+#' @param download_totals List from fetch_download_totals()
+#' @param rev_deps List from fetch_reverse_deps(), or NULL if unavailable
+#' @return List with `score`, `details` and `weight_available`
 calculate_health_score <- function(
   metadata, versions_data, download_totals, rev_deps
 ) {
@@ -61,100 +86,102 @@ calculate_health_score <- function(
   max_score <- 0
   details <- list()
 
-  # 1. Recency of last update (max 30 points)
-  max_score <- max_score + 30
-  if (!is.null(versions_data)) {
-    timeline <- versions_data$timeline
-    if (!is.null(timeline) && length(timeline) > 0) {
-      dates <- as.Date(substr(unlist(timeline), 1, 10))
-      last_update <- max(dates, na.rm = TRUE)
-      days_since <- as.numeric(Sys.Date() - last_update)
-
-      if (days_since <= 90) {
-        score <- score + 30
-        details$recency <- list(
-          text = "Updated within last 3 months",
-          sentiment = "good"
-        )
-      } else if (days_since <= 180) {
-        score <- score + 25
-        details$recency <- list(
-          text = "Updated within last 6 months",
-          sentiment = "good"
-        )
-      } else if (days_since <= 365) {
-        score <- score + 18
-        details$recency <- list(
-          text = "Updated within last year",
-          sentiment = "neutral"
-        )
-      } else if (days_since <= 730) {
-        score <- score + 10
-        details$recency <- list(
-          text = "Updated within last 2 years",
-          sentiment = "warn"
-        )
-      } else {
-        score <- score + 3
-        details$recency <- list(
-          text = paste0(
-            "Last updated ",
-            round(days_since / 365, 1),
-            " years ago"
-          ),
-          sentiment = "bad"
-        )
-      }
-    }
+  unavailable <- function(what) {
+    list(
+      text = paste0(what, " unavailable"),
+      sentiment = "unknown"
+    )
   }
+
+  # 1. Recency of last update (max 30 points)
+  timeline <- versions_data$timeline
+  if (!is.null(timeline) && length(timeline) > 0) {
+    max_score <- max_score + 30
+    dates <- as.Date(substr(unlist(timeline), 1, 10))
+    last_update <- max(dates, na.rm = TRUE)
+    days_since <- as.numeric(Sys.Date() - last_update)
+
+    if (days_since <= 90) {
+      score <- score + 30
+      details$recency <- list(
+        text = "Updated within last 3 months",
+        sentiment = "good"
+      )
+    } else if (days_since <= 180) {
+      score <- score + 25
+      details$recency <- list(
+        text = "Updated within last 6 months",
+        sentiment = "good"
+      )
+    } else if (days_since <= 365) {
+      score <- score + 18
+      details$recency <- list(
+        text = "Updated within last year",
+        sentiment = "neutral"
+      )
+    } else if (days_since <= 730) {
+      score <- score + 10
+      details$recency <- list(
+        text = "Updated within last 2 years",
+        sentiment = "warn"
+      )
+    } else {
+      score <- score + 3
+      details$recency <- list(
+        text = paste0(
+          "Last updated ",
+          round(days_since / 365, 1),
+          " years ago"
+        ),
+        sentiment = "bad"
+      )
+    }
+  } else {
+    details$recency <- unavailable("Update history")
+  }
+
+  monthly <- download_totals$last_month %||% NA
+  yearly <- download_totals$last_year %||% NA
 
   # 2. Download momentum (max 25 points)
-  max_score <- max_score + 25
-  monthly <- if (!is.null(download_totals)) {
-    download_totals$last_month
-  } else {
-    NA
-  }
-  yearly <- if (!is.null(download_totals)) {
-    download_totals$last_year
-  } else {
-    NA
-  }
   if (!is.na(monthly) && !is.na(yearly) && yearly > 0) {
+    max_score <- max_score + 25
     monthly_avg <- yearly / 12
-    if (monthly_avg > 0) {
-      momentum <- monthly / monthly_avg
-      if (momentum >= 1.1) {
-        score <- score + 25
-        details$momentum <- list(
-          text = "Downloads trending up",
-          sentiment = "good"
-        )
-      } else if (momentum >= 0.9) {
-        score <- score + 20
-        details$momentum <- list(
-          text = "Downloads stable",
-          sentiment = "good"
-        )
-      } else if (momentum >= 0.7) {
-        score <- score + 12
-        details$momentum <- list(
-          text = "Downloads slightly declining",
-          sentiment = "warn"
-        )
-      } else {
-        score <- score + 5
-        details$momentum <- list(
-          text = "Downloads declining",
-          sentiment = "bad"
-        )
-      }
+    momentum <- monthly / monthly_avg
+
+    if (momentum >= 1.1) {
+      score <- score + 25
+      details$momentum <- list(
+        text = "Downloads trending up",
+        sentiment = "good"
+      )
+    } else if (momentum >= 0.9) {
+      score <- score + 20
+      details$momentum <- list(
+        text = "Downloads stable",
+        sentiment = "good"
+      )
+    } else if (momentum >= 0.7) {
+      score <- score + 12
+      details$momentum <- list(
+        text = "Downloads slightly declining",
+        sentiment = "warn"
+      )
+    } else {
+      score <- score + 5
+      details$momentum <- list(
+        text = "Downloads declining",
+        sentiment = "bad"
+      )
     }
+  } else {
+    details$momentum <- unavailable("Download trend")
   }
 
   # 3. Download volume (max 20 points)
-  max_score <- max_score + 20
-  if (!is.null(monthly) && !is.na(monthly)) {
+  if (!is.na(monthly)) {
+    max_score <- max_score + 20
+
     if (monthly >= 100000) {
       score <- score + 20
       details$volume <- list(
@@ -186,60 +213,66 @@ calculate_health_score <- function(
         sentiment = "bad"
       )
     }
+  } else {
+    details$volume <- unavailable("Download volume")
   }
 
   # 4. Reverse dependencies (max 15 points)
-  max_score <- max_score + 15
-  rev_total <- if (!is.null(rev_deps)) {
-    rev_deps$total
+  # A zero count is a real signal about the package. NULL means the
+  # lookup failed, which says nothing about it either way.
+  if (!is.null(rev_deps)) {
+    max_score <- max_score + 15
+    rev_total <- rev_deps$total %||% 0
+
+    if (rev_total >= 100) {
+      score <- score + 15
+      details$ecosystem <- list(
+        text = paste0(
+          rev_total, " reverse dependencies",
+          " \u2014 core ecosystem package"
+        ),
+        sentiment = "good"
+      )
+    } else if (rev_total >= 20) {
+      score <- score + 12
+      details$ecosystem <- list(
+        text = paste0(
+          rev_total, " reverse dependencies",
+          " \u2014 well-established"
+        ),
+        sentiment = "good"
+      )
+    } else if (rev_total >= 5) {
+      score <- score + 8
+      details$ecosystem <- list(
+        text = paste0(
+          rev_total, " reverse dependencies"
+        ),
+        sentiment = "neutral"
+      )
+    } else if (rev_total >= 1) {
+      score <- score + 4
+      details$ecosystem <- list(
+        text = paste0(
+          rev_total, " reverse dependency"
+        ),
+        sentiment = "warn"
+      )
+    } else {
+      details$ecosystem <- list(
+        text = "No reverse dependencies",
+        sentiment = "bad"
+      )
+    }
   } else {
-    0
-  }
-  if (rev_total >= 100) {
-    score <- score + 15
-    details$ecosystem <- list(
-      text = paste0(
-        rev_total, " reverse dependencies",
-        " \u2014 core ecosystem package"
-      ),
-      sentiment = "good"
-    )
-  } else if (rev_total >= 20) {
-    score <- score + 12
-    details$ecosystem <- list(
-      text = paste0(
-        rev_total, " reverse dependencies",
-        " \u2014 well-established"
-      ),
-      sentiment = "good"
-    )
-  } else if (rev_total >= 5) {
-    score <- score + 8
-    details$ecosystem <- list(
-      text = paste0(
-        rev_total, " reverse dependencies"
-      ),
-      sentiment = "neutral"
-    )
-  } else if (rev_total >= 1) {
-    score <- score + 4
-    details$ecosystem <- list(
-      text = paste0(
-        rev_total, " reverse dependency"
-      ),
-      sentiment = "warn"
-    )
-  } else {
-    details$ecosystem <- list(
-      text = "No reverse dependencies",
-      sentiment = "bad"
-    )
+    details$ecosystem <- unavailable("Reverse dependencies")
   }
 
   # 5. Version maturity (max 10 points)
-  max_score <- max_score + 10
   if (!is.null(versions_data$versions)) {
+    max_score <- max_score + 10
     n_versions <- length(versions_data$versions)
+
     if (n_versions >= 10) {
       score <- score + 10
       details$maturity <- list(
@@ -271,19 +304,30 @@ calculate_health_score <- function(
         sentiment = "warn"
       )
     }
+  } else {
+    details$maturity <- unavailable("Release history")
   }
 
   final_score <- if (max_score > 0) {
     round(score / max_score * 100)
   } else {
-    0
+    NA_integer_
   }
 
-  list(score = final_score, details = details)
+  list(
+    score = final_score,
+    details = details,
+    weight_available = max_score
+  )
 }
 
 #' Get a color for the health score
+#' @param score Numeric score, or NA when nothing could be scored
+#' @return Character, a hex colour
 health_score_color <- function(score) {
+  if (is.null(score) || length(score) == 0 || is.na(score)) {
+    return("#94a3b8")
+  }
   if (score >= 75) return("#22c55e")
   if (score >= 50) return("#eab308")
   if (score >= 25) return("#f97316")
@@ -291,7 +335,12 @@ health_score_color <- function(score) {
 }
 
 #' Get a label for the health score
+#' @param score Numeric score, or NA when nothing could be scored
+#' @return Character label
 health_score_label <- function(score) {
+  if (is.null(score) || length(score) == 0 || is.na(score)) {
+    return("Unavailable")
+  }
   if (score >= 75) return("Excellent")
   if (score >= 50) return("Good")
   if (score >= 25) return("Fair")
@@ -339,4 +388,68 @@ build_version_history <- function(versions_data) {
   df <- df[order(df$date, decreasing = TRUE), ]
   df$days_since <- as.numeric(Sys.Date() - df$date)
   df
+}
+
+#' Overlay the live CRAN record onto lagging crandb data
+#'
+#' crandb rebuilds its index on its own schedule and can sit days behind
+#' CRAN, so a freshly published version shows up on CRAN long before it
+#' reaches crandb. Where the two disagree, CRAN wins: its DESCRIPTION
+#' replaces the metadata, and the new release is appended to the version
+#' history so the timeline, release count and recency score see it.
+#'
+#' @param metadata List from fetch_package_metadata()
+#' @param versions List from fetch_package_versions()
+#' @param cran List from fetch_cran_description()
+#' @return List with `metadata`, `versions` and `stale` (logical)
+reconcile_with_cran <- function(metadata, versions, cran) {
+  result <- list(
+    metadata = metadata, versions = versions, stale = FALSE
+  )
+
+  if (is.null(cran) || is.null(cran$Version)) return(result)
+  if (is.null(metadata)) return(result)
+
+  cran_ver <- as.character(cran$Version)
+  crandb_ver <- as.character(metadata$Version %||% "")
+
+  if (identical(cran_ver, crandb_ver)) return(result)
+
+  # Only move forward: an older CRAN read means the package was archived
+  # or the response was unexpected, and crandb stays authoritative.
+  if (nzchar(crandb_ver) &&
+        utils::compareVersion(cran_ver, crandb_ver) <= 0) {
+    return(result)
+  }
+
+  result$stale <- TRUE
+  result$metadata <- cran
+
+  published <- cran$`Date/Publication` %||% cran$Packaged %||% NULL
+  release_date <- if (!is.null(published)) {
+    d <- as.Date(substr(published, 1, 10))
+    if (is.na(d)) Sys.Date() else d
+  } else {
+    Sys.Date()
+  }
+  stamp <- paste0(format(release_date, "%Y-%m-%d"), "T00:00:00+00:00")
+
+  if (is.null(result$versions)) {
+    result$versions <- list(versions = list(), timeline = list())
+  }
+  if (is.null(result$versions$timeline)) {
+    result$versions$timeline <- list()
+  }
+  if (is.null(result$versions$versions)) {
+    result$versions$versions <- list()
+  }
+
+  if (is.null(result$versions$timeline[[cran_ver]])) {
+    result$versions$timeline[[cran_ver]] <- stamp
+  }
+  if (is.null(result$versions$versions[[cran_ver]])) {
+    result$versions$versions[[cran_ver]] <- cran
+  }
+
+  result
 }

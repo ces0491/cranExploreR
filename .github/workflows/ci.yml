@@ -3,6 +3,8 @@ name: CI
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
   validate:
@@ -19,7 +21,7 @@ jobs:
         run: |
           install.packages(c(
             "shiny", "bslib", "httr2", "jsonlite",
-            "plotly", "DT", "rsconnect", "lintr"
+            "plotly", "DT", "rsconnect", "lintr", "testthat"
           ))
         shell: Rscript {0}
 
@@ -74,7 +76,12 @@ jobs:
             "fetch_top_downloads", "format_number",
             "calculate_health_score", "health_score_color",
             "health_score_label", "parse_dependencies",
-            "build_version_history", "package_links_html"
+            "build_version_history", "package_links_html",
+            "fetch_cran_description", "parse_dcf_deps",
+            "reconcile_with_cran", "fetch_packages_by_letter",
+            "run_package_search", "as_download_count",
+            "cran_request", "fetch_json", "fetch_text",
+            "cache_get", "cache_set", "cache_clear"
           )
           missing_fns <- fns[!vapply(fns, exists, logical(1))]
           if (length(missing_fns) > 0) {
@@ -97,6 +104,13 @@ jobs:
           # Check server is a function
           stopifnot(is.function(server))
           cat("Server is a function\n")
+        shell: Rscript {0}
+
+      - name: Unit tests
+        run: |
+          testthat::test_dir(
+            "tests/testthat", stop_on_failure = TRUE
+          )
         shell: Rscript {0}
 
       - name: Smoke test API endpoints
@@ -126,9 +140,40 @@ jobs:
           }
           cat("Search API OK\n")
 
+          # Test CRAN DESCRIPTION endpoint and reconciliation
+          cran <- fetch_cran_description("jsonlite")
+          if (is.null(cran)) {
+            stop("CRAN DESCRIPTION endpoint not responding")
+          }
+          stopifnot(
+            cran$Package == "jsonlite",
+            nzchar(cran$Version)
+          )
+          cat("CRAN DESCRIPTION OK\n")
+
+          # Test the alphabetical browse query, which fails
+          # silently when the field query is over-encoded
+          letter <- fetch_packages_by_letter("A", limit = 5)
+          if (is.null(letter) || nrow(letter) == 0) {
+            stop("Alphabetical browse returned nothing")
+          }
+          stopifnot(
+            all(grepl("^[Aa]", letter$package))
+          )
+          cat("Alphabetical browse OK\n")
+
           # Test health score calculation
           versions <- fetch_package_versions("jsonlite")
           rev_deps <- fetch_reverse_deps("jsonlite")
+
+          reconciled <- reconcile_with_cran(meta, versions, cran)
+          shown <- reconciled$metadata$Version
+          stopifnot(
+            utils::compareVersion(shown, meta$Version) >= 0,
+            !is.null(reconciled$versions$timeline[[shown]])
+          )
+          cat("CRAN reconciliation OK\n")
+
           health <- calculate_health_score(
             meta, versions, totals, rev_deps
           )

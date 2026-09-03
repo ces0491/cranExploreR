@@ -490,6 +490,16 @@ ui <- page_navbar(
           "for evaluation, not a definitive",
           "judgement \u2014 context always matters."
         ),
+        p(
+          "When a factor cannot be fetched it is",
+          "dropped from the calculation rather than",
+          "scored zero, and the score is",
+          "renormalised over the remaining weight,",
+          "so a failed request does not read as a",
+          "low score. The score card says how much",
+          "weighting it was computed over, and the",
+          "Compare table marks a partial score."
+        ),
         tags$table(
           class = "table table-sm",
           tags$thead(
@@ -552,6 +562,17 @@ ui <- page_navbar(
             ),
             " \u2014 Package metadata",
             "and version history"
+          ),
+          tags$li(
+            tags$a(
+              href = "https://cran.r-project.org",
+              "CRAN"
+            ),
+            " \u2014 Current published version.",
+            "crandb can sit several days behind CRAN,",
+            "so where the two disagree the CRAN version",
+            "is shown and the missing release is added",
+            "to the version history."
           ),
           tags$li(
             tags$a(

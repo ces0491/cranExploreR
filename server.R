@@ -1,4 +1,5 @@
 library(shiny)
+library(bslib)
 library(plotly)
 library(DT)
 
@@ -83,8 +84,24 @@ server <- function(input, output, session) {
     load_package(input$select_pkg)
   })
 
+  # Clear everything the Explorer tab renders, so a load that fails
+  # part way through cannot leave the previous package's chart, stats
+  # and score on screen under a blank header.
+  reset_package_state <- function() {
+    rv$selected_pkg <- NULL
+    rv$metadata <- NULL
+    rv$versions <- NULL
+    rv$downloads_daily <- NULL
+    rv$download_totals <- NULL
+    rv$lifetime_downloads <- NA_real_
+    rv$rev_deps <- NULL
+    rv$health <- NULL
+  }
+
   # Core function to load all package data
   load_package <- function(pkg_name) {
+    reset_package_state()
+
     withProgress(
       message = paste("Loading", pkg_name, "..."),
       {
@@ -106,18 +123,41 @@ server <- function(input, output, session) {
         )
         rv$versions <- fetch_package_versions(pkg_name)
 
-        incProgress(
-          0.15, detail = "Fetching download stats"
+        # crandb can lag CRAN by days; where they disagree
+        # take the current release straight from CRAN
+        reconciled <- reconcile_with_cran(
+          rv$metadata, rv$versions,
+          fetch_cran_description(pkg_name)
         )
-        rv$download_totals <- fetch_download_totals(
-          pkg_name
-        )
+        if (reconciled$stale) {
+          showNotification(
+            paste0(
+              "The crandb index is behind CRAN. Showing v",
+              reconciled$metadata$Version,
+              " from CRAN; download history may lag too."
+            ),
+            type = "message",
+            duration = 8
+          )
+        }
+        rv$metadata <- reconciled$metadata
+        rv$versions <- reconciled$versions
 
         incProgress(
           0.15, detail = "Fetching daily downloads"
         )
         rv$downloads_daily <- fetch_daily_downloads(
           pkg_name
+        )
+
+        # The daily series covers the same 365 days as the
+        # yearly total, so hand it over instead of asking
+        # cranlogs for a number we already have.
+        incProgress(
+          0.15, detail = "Fetching download stats"
+        )
+        rv$download_totals <- fetch_download_totals(
+          pkg_name, rv$downloads_daily
         )
 
         incProgress(
@@ -141,7 +181,9 @@ server <- function(input, output, session) {
         )
         rv$rev_deps <- fetch_reverse_deps(pkg_name)
 
-        # Notify on partial failures
+        # Notify on partial failures. Anything listed here is a
+        # factor the viability score was computed without, so the
+        # score is normalised over what did arrive.
         failures <- c()
         if (is.null(rv$versions)) {
           failures <- c(failures, "version history")
@@ -149,8 +191,11 @@ server <- function(input, output, session) {
         if (is.null(rv$downloads_daily)) {
           failures <- c(failures, "daily downloads")
         }
-        if (is.null(rv$download_totals)) {
+        if (is.na(rv$download_totals$last_month)) {
           failures <- c(failures, "download totals")
+        }
+        if (is.null(rv$rev_deps)) {
+          failures <- c(failures, "reverse dependencies")
         }
         if (length(failures) > 0) {
           showNotification(
@@ -502,13 +547,30 @@ server <- function(input, output, session) {
       "font-weight: 600; font-size: 1.1rem;"
     )
 
+    # Say so when a factor could not be fetched, rather than
+    # presenting a partial score as a complete one.
+    available <- rv$health$weight_available
+    caveat <- if (!is.na(score) && available < 100) {
+      tags$div(
+        class = "text-muted small mt-1",
+        paste0(
+          "Scored on ", available,
+          " of 100 points of weighting"
+        )
+      )
+    }
+
     tags$div(
       class = "text-center",
       tags$div(
         style = circle_style,
-        tags$span(score, style = score_style)
+        tags$span(
+          if (is.na(score)) "?" else score,
+          style = score_style
+        )
       ),
-      tags$span(label, style = label_style)
+      tags$span(label, style = label_style),
+      caveat
     )
   })
 
@@ -535,6 +597,10 @@ server <- function(input, output, session) {
           bad = list(
             name = "circle-xmark",
             cls = "text-danger me-1"
+          ),
+          unknown = list(
+            name = "circle-question",
+            cls = "text-muted me-1"
           )
         )
         ico <- ico_map[[
@@ -822,7 +888,18 @@ server <- function(input, output, session) {
 
   # Reverse dependencies summary
   output$rev_deps_summary <- renderUI({
-    req(rv$rev_deps)
+    req(rv$selected_pkg)
+
+    # NULL means the lookup failed. Showing zero here would read as
+    # "nothing depends on this", which is a very different claim.
+    if (is.null(rv$rev_deps)) {
+      return(tags$p(
+        icon("circle-question", class = "text-muted me-1"),
+        "Reverse dependency data unavailable.",
+        class = "text-muted"
+      ))
+    }
+
     rd <- rv$rev_deps
 
     dep_row <- function(label, value) {
@@ -908,12 +985,25 @@ server <- function(input, output, session) {
           l, "..."
         ),
         {
-          rv$browse_results <- search_packages(
-            paste0("package:", l, "*"), limit = 50
-          )
-          rv$browse_label <- paste(
-            "Packages starting with", l
-          )
+          results <- fetch_packages_by_letter(l, limit = 50)
+          rv$browse_results <- results
+
+          if (is.null(results)) {
+            rv$browse_label <- paste(
+              "No packages found starting with", l
+            )
+          } else {
+            total <- attr(results, "total") %||% nrow(results)
+            rv$browse_label <- if (total > nrow(results)) {
+              paste0(
+                "Packages starting with ", l,
+                " (", nrow(results), " of ",
+                format_number(total), ")"
+              )
+            } else {
+              paste("Packages starting with", l)
+            }
+          }
         }
       )
     })
@@ -944,12 +1034,21 @@ server <- function(input, output, session) {
         "Package", "Title", "Version", "Links"
       )
     }
-    df
-  },
-  selection = "single", rownames = FALSE,
-  escape = FALSE,
-  options = list(pageLength = 20, dom = "frtip"),
-  class = "compact hover")
+
+    # Only the Links column holds markup we built ourselves. Titles
+    # and names come from the search index, so leave them escaped.
+    datatable(
+      df,
+      selection = "single",
+      rownames = FALSE,
+      escape = setdiff(
+        seq_len(ncol(df)),
+        which(names(df) == "Links")
+      ),
+      options = list(pageLength = 20, dom = "frtip"),
+      class = "compact hover"
+    )
+  })
 
   # Click a row to load in Explorer
   observeEvent(input$browse_table_rows_selected, {
@@ -1071,9 +1170,16 @@ server <- function(input, output, session) {
         meta <- fetch_package_metadata(pkg)
         if (is.null(meta)) return(NULL)
 
-        totals <- fetch_download_totals(pkg)
         daily <- fetch_daily_downloads(pkg)
+        totals <- fetch_download_totals(pkg, daily)
         versions <- fetch_package_versions(pkg)
+
+        reconciled <- reconcile_with_cran(
+          meta, versions, fetch_cran_description(pkg)
+        )
+        meta <- reconciled$metadata
+        versions <- reconciled$versions
+
         rdeps <- fetch_reverse_deps(pkg)
         health <- calculate_health_score(
           meta, versions, totals, rdeps
@@ -1168,9 +1274,15 @@ server <- function(input, output, session) {
       data.frame(
         Package = item$package,
         Version = meta$Version %||% "",
-        `Viability Score` = paste0(
-          item$health$score, "/100"
-        ),
+        # Two scores sit side by side here, so a score computed
+        # over less than the full weighting has to say so.
+        `Viability Score` = if (is.na(item$health$score)) {
+          "N/A"
+        } else if (item$health$weight_available < 100) {
+          paste0(item$health$score, "/100 (partial)")
+        } else {
+          paste0(item$health$score, "/100")
+        },
         `Monthly Downloads` = format_number(
           totals$last_month
         ),
@@ -1182,7 +1294,7 @@ server <- function(input, output, session) {
           }
         ),
         `Reverse Deps` = format_number(
-          item$rev_deps$total
+          item$rev_deps$total %||% NA_real_
         ),
         Releases = if (!is.na(n_ver)) {
           as.character(n_ver)

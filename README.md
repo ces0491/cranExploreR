@@ -14,7 +14,7 @@ cranExploreR pulls live data from CRAN APIs to give you download statistics, mai
   - Weekly totals (default)
   - Cumulative downloads
   - Mean weekly downloads over the period
-  - Version releases, colouring the weekly series by the version current at the time
+  - Version releases, colouring the weekly series by the version current at the start of each week. A release that never held a week boundary — superseded within days, or published since the last full week — is drawn as a dotted marker instead, so the legend accounts for every release in the version history
 - **Download statistics** — lifetime downloads, days on CRAN, daily and weekly averages, and peak day and week
 - **Viability score** (0-100) — weighted composite of recency, download momentum, volume, ecosystem adoption, and maturity
 - **Package links** — direct links to CRAN page, documentation/vignettes, GitHub repo, and issue tracker (when available)
@@ -46,7 +46,7 @@ Side-by-side comparison of 2-3 packages:
 | Source | Provides |
 | ------ | -------- |
 | [crandb](https://crandb.r-pkg.org) | Package metadata and version history |
-| [CRAN](https://cran.r-project.org) | Current published version, read from the package DESCRIPTION |
+| [CRAN](https://cran.r-project.org) | Current published versions, from the package DESCRIPTION and the repository index |
 | [cranlogs](https://cranlogs.r-pkg.org) | Download statistics and top packages |
 | [R package search](https://search.r-pkg.org) | Full-text package search |
 
@@ -54,6 +54,12 @@ crandb rebuilds its index on its own schedule and can sit several days behind
 CRAN, so a newly published release will not appear there straight away. The app
 reads the DESCRIPTION file from CRAN alongside it and, where the two disagree,
 shows the CRAN version and adds the missing release to the version history.
+
+The search index behind the sidebar and the Browse tab lags in the same way,
+so the version shown against each result is corrected against the CRAN
+repository index. That is one request covering every package, which a
+per-package DESCRIPTION read could not manage for a 50-row page.
+
 Download figures still come from cranlogs and can lag by a day or two.
 
 Parsed responses are cached in memory for 15 minutes, so revisiting a package or
@@ -114,10 +120,17 @@ The viability score (0-100) is a weighted composite that summarises five dimensi
 | Factor | Weight | What it measures |
 | ------ | ------ | ---------------- |
 | Recency | 30% | How recently the package was updated on CRAN |
-| Download momentum | 25% | Whether downloads are growing, stable, or declining |
+| Download momentum | 25% | Mean downloads per day over the last 30 days against the mean over every earlier day on record |
 | Download volume | 20% | Absolute number of monthly downloads |
 | Ecosystem adoption | 15% | Number of other packages that depend on it |
 | Maturity | 10% | Total number of releases over the package's lifetime |
+
+Momentum compares rates per day rather than period totals, because cranlogs
+returns data only from a package's first publication. A package four months old
+has four months of rows, so dividing its total by twelve months would understate
+the baseline threefold and report a decline as growth. A package with fewer than
+60 days on CRAN has no baseline to compare against, and momentum is reported as
+unavailable rather than guessed at.
 
 A factor whose data cannot be fetched is dropped from the calculation rather
 than scored zero, and the score is renormalised over the remaining weight, so an

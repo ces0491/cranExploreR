@@ -11,9 +11,14 @@ middling_totals <- list(
   last_day = 3, last_week = 20, last_month = 100, last_year = 1200
 )
 
+# Flat rate, so momentum lands in the "stable" band and the
+# arithmetic below stays about the other four factors.
+middling_daily <- function() daily_series(200, 3.3, 3.3)
+
 test_that("all factors present scores over the full weighting", {
   h <- calculate_health_score(
-    NULL, middling_versions(), middling_totals, list(total = 3)
+    NULL, middling_versions(), middling_totals, list(total = 3),
+    middling_daily()
   )
   # 10/30 recency + 20/25 momentum + 6/20 volume
   #  + 4/15 ecosystem + 4/10 maturity = 44 of 100
@@ -23,7 +28,8 @@ test_that("all factors present scores over the full weighting", {
 
 test_that("a failed lookup drops its weight instead of scoring zero", {
   h <- calculate_health_score(
-    NULL, middling_versions(), middling_totals, NULL
+    NULL, middling_versions(), middling_totals, NULL,
+    middling_daily()
   )
   expect_equal(h$weight_available, 85)
   expect_equal(h$score, 47)
@@ -33,7 +39,8 @@ test_that("a failed lookup drops its weight instead of scoring zero", {
 
 test_that("zero reverse dependencies is scored, not treated as missing", {
   h <- calculate_health_score(
-    NULL, middling_versions(), middling_totals, list(total = 0)
+    NULL, middling_versions(), middling_totals, list(total = 0),
+    middling_daily()
   )
   expect_equal(h$weight_available, 100)
   expect_equal(h$details$ecosystem$sentiment, "bad")
@@ -42,7 +49,7 @@ test_that("zero reverse dependencies is scored, not treated as missing", {
 
 test_that("missing version history drops recency and maturity", {
   h <- calculate_health_score(
-    NULL, NULL, middling_totals, list(total = 3)
+    NULL, NULL, middling_totals, list(total = 3), middling_daily()
   )
   expect_equal(h$weight_available, 60)
   expect_equal(h$details$recency$sentiment, "unknown")
@@ -86,7 +93,8 @@ test_that("a strong package still scores well", {
       last_day = 1e4, last_week = 7e4,
       last_month = 3e5, last_year = 3e6
     ),
-    list(total = 150)
+    list(total = 150),
+    daily_series(200, early_rate = 8000, late_rate = 10000)
   )
   expect_equal(h$score, 100)
   expect_equal(health_score_label(h$score), "Excellent")
@@ -104,10 +112,12 @@ test_that("score colour and label cope with NA", {
 
 test_that("weight_available distinguishes a partial score", {
   full <- calculate_health_score(
-    NULL, middling_versions(), middling_totals, list(total = 3)
+    NULL, middling_versions(), middling_totals, list(total = 3),
+    middling_daily()
   )
   partial <- calculate_health_score(
-    NULL, middling_versions(), middling_totals, NULL
+    NULL, middling_versions(), middling_totals, NULL,
+    middling_daily()
   )
   # The compare table and the score card both key their caveat off this.
   expect_equal(full$weight_available, 100)

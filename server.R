@@ -213,7 +213,8 @@ server <- function(input, output, session) {
         )
         rv$health <- calculate_health_score(
           rv$metadata, rv$versions,
-          rv$download_totals, rv$rev_deps
+          rv$download_totals, rv$rev_deps,
+          rv$downloads_daily
         )
       }
     )
@@ -321,10 +322,10 @@ server <- function(input, output, session) {
     format_number(rv$download_totals$last_month)
   })
   output$dl_year <- renderText({
-    # Derive from daily data for consistency rather than
-    # relying on the cranlogs total endpoint which can lag
-    req(rv$downloads_daily)
-    format_number(sum(rv$downloads_daily$count, na.rm = TRUE))
+    # fetch_download_totals() sums the daily series for this rather
+    # than calling the cranlogs total endpoint, which can lag.
+    req(rv$download_totals)
+    format_number(rv$download_totals$last_year)
   })
 
   # Download trend plot
@@ -360,32 +361,10 @@ server <- function(input, output, session) {
     }
 
     if ("weekly" %in% selected && show_versions) {
-      # Map each week to the current version
+      # Map each week to the version current when the week began
       timeline <- rv$versions$timeline
-      ver_names <- names(timeline)
-      ver_dates <- as.Date(
-        substr(unlist(timeline), 1, 10)
-      )
-      ver_df <- data.frame(
-        version = ver_names,
-        date = ver_dates,
-        stringsAsFactors = FALSE
-      )
-      ver_df <- ver_df[order(ver_df$date), ]
-
-      # Assign version to each week
-      weekly$version <- vapply(
-        weekly$week,
-        function(w) {
-          idx <- which(ver_df$date <= w)
-          if (length(idx) == 0) {
-            ver_df$version[1]
-          } else {
-            ver_df$version[max(idx)]
-          }
-        },
-        character(1)
-      )
+      ver_df <- version_release_frame(timeline)
+      weekly$version <- weekly_version_map(weekly$week, timeline)
 
       # Color palette for versions
       ver_colors <- c(
@@ -430,6 +409,28 @@ server <- function(input, output, session) {
               ),
               ", 0.1)"
             )
+          )
+      }
+
+      # A release only earns a band if it was the current version at
+      # the start of some week, so one superseded within a few days,
+      # or published since the last full week, gets none. Mark those
+      # with a dotted line, otherwise the legend silently reports
+      # fewer releases than the version history lists.
+      unbanded <- setdiff(ver_df$version, unique_vers)
+      for (v in unbanded) {
+        d <- ver_df$date[ver_df$version == v]
+        if (d < min(weekly$week)) next
+
+        p <- p |>
+          add_segments(
+            x = d, xend = d,
+            y = 0, yend = max(weekly$count, na.rm = TRUE),
+            line = list(
+              color = "grey", dash = "dot", width = 1
+            ),
+            name = paste0("v", v),
+            showlegend = TRUE
           )
       }
     }
@@ -1182,7 +1183,7 @@ server <- function(input, output, session) {
 
         rdeps <- fetch_reverse_deps(pkg)
         health <- calculate_health_score(
-          meta, versions, totals, rdeps
+          meta, versions, totals, rdeps, daily
         )
 
         list(
@@ -1287,11 +1288,7 @@ server <- function(input, output, session) {
           totals$last_month
         ),
         `Yearly Downloads` = format_number(
-          if (!is.null(item$daily)) {
-            sum(item$daily$count, na.rm = TRUE)
-          } else {
-            NA
-          }
+          totals$last_year %||% NA_real_
         ),
         `Reverse Deps` = format_number(
           item$rev_deps$total %||% NA_real_

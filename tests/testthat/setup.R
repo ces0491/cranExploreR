@@ -53,3 +53,23 @@ fake_versions <- function(versions, dates) {
     )
   )
 }
+
+#' Build a daily download series with a step change in rate
+#'
+#' The last `window` days carry `late_rate`, everything before carries
+#' `early_rate`, so the momentum ratio is late/early.
+#'
+#' @param days Integer, total days of history
+#' @param early_rate Numeric, downloads per day before the recent window
+#' @param late_rate Numeric, downloads per day in the recent window
+#' @param window Integer, length of the recent window
+#' @return Data frame with `date` and `count`
+daily_series <- function(days, early_rate, late_rate, window = 30) {
+  dates <- seq(Sys.Date() - days, Sys.Date() - 1, by = "day")
+  data.frame(
+    date = dates,
+    count = ifelse(
+      dates > max(dates) - window, late_rate, early_rate
+    )
+  )
+}

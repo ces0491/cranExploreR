@@ -81,7 +81,10 @@ jobs:
             "reconcile_with_cran", "fetch_packages_by_letter",
             "run_package_search", "as_download_count",
             "cran_request", "fetch_json", "fetch_text",
-            "cache_get", "cache_set", "cache_clear"
+            "cache_get", "cache_set", "cache_clear",
+            "fetch_cran_versions", "apply_cran_versions",
+            "version_release_frame", "weekly_version_map",
+            "download_momentum"
           )
           missing_fns <- fns[!vapply(fns, exists, logical(1))]
           if (length(missing_fns) > 0) {
@@ -162,6 +165,19 @@ jobs:
           )
           cat("Alphabetical browse OK\n")
 
+          # The search index lags CRAN, so results are
+          # corrected against the repository index
+          idx <- fetch_cran_versions()
+          if (is.null(idx) || length(idx) == 0) {
+            stop("CRAN repository index unavailable")
+          }
+          hits <- search_packages("jsonlite", limit = 5)
+          stopifnot(
+            hits$version[hits$package == "jsonlite"] ==
+              idx[["jsonlite"]]
+          )
+          cat("Search version correction OK\n")
+
           # Test health score calculation
           versions <- fetch_package_versions("jsonlite")
           rev_deps <- fetch_reverse_deps("jsonlite")
@@ -174,8 +190,12 @@ jobs:
           )
           cat("CRAN reconciliation OK\n")
 
+          daily <- fetch_daily_downloads("jsonlite")
           health <- calculate_health_score(
-            meta, versions, totals, rev_deps
+            meta, versions, totals, rev_deps, daily
+          )
+          stopifnot(
+            health$details$momentum$sentiment != "unknown"
           )
           stopifnot(
             health$score >= 0,

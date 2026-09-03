@@ -66,6 +66,43 @@ package_links_html <- function(pkg_name) {
   )
 }
 
+#' Compare the recent download rate against the period before it
+#'
+#' Rates per day, not period totals, because cranlogs returns data only
+#' from a package's first publication. A package four months old has four
+#' months of rows, and dividing its total by twelve would understate the
+#' baseline by three times, reporting a decline as growth.
+#'
+#' @param daily Data frame from fetch_daily_downloads(), with `date` and
+#'   `count`
+#' @param window Integer, length in days of the recent period
+#' @return List with `ratio`, `recent`, `baseline` and `baseline_days`,
+#'   or NULL when there is too little history to compare
+download_momentum <- function(daily, window = 30) {
+  if (is.null(daily) || !is.data.frame(daily)) return(NULL)
+  if (!all(c("date", "count") %in% names(daily))) return(NULL)
+  if (nrow(daily) < window * 2) return(NULL)
+
+  daily <- daily[order(daily$date), ]
+  cutoff <- max(daily$date) - window
+
+  recent <- daily$count[daily$date > cutoff]
+  before <- daily$count[daily$date <= cutoff]
+  if (length(recent) == 0 || length(before) == 0) return(NULL)
+
+  recent_rate <- mean(recent, na.rm = TRUE)
+  baseline_rate <- mean(before, na.rm = TRUE)
+  if (is.na(recent_rate) || is.na(baseline_rate)) return(NULL)
+  if (baseline_rate <= 0) return(NULL)
+
+  list(
+    ratio = recent_rate / baseline_rate,
+    recent = recent_rate,
+    baseline = baseline_rate,
+    baseline_days = length(before)
+  )
+}
+
 #' Calculate a maintenance health score (0-100)
 #'
 #' Each factor contributes to the denominator only when the data behind
@@ -78,9 +115,13 @@ package_links_html <- function(pkg_name) {
 #' @param versions_data List from fetch_package_versions()
 #' @param download_totals List from fetch_download_totals()
 #' @param rev_deps List from fetch_reverse_deps(), or NULL if unavailable
+#' @param daily_downloads Data frame from fetch_daily_downloads(), used
+#'   for the momentum factor; without it momentum is reported unavailable
+#'   rather than guessed at from period totals
 #' @return List with `score`, `details` and `weight_available`
 calculate_health_score <- function(
-  metadata, versions_data, download_totals, rev_deps
+  metadata, versions_data, download_totals, rev_deps,
+  daily_downloads = NULL
 ) {
   score <- 0
   max_score <- 0
@@ -141,36 +182,44 @@ calculate_health_score <- function(
   }
 
   monthly <- download_totals$last_month %||% NA
-  yearly <- download_totals$last_year %||% NA
 
   # 2. Download momentum (max 25 points)
-  if (!is.na(monthly) && !is.na(yearly) && yearly > 0) {
+  mom <- download_momentum(daily_downloads)
+  if (!is.null(mom)) {
     max_score <- max_score + 25
-    monthly_avg <- yearly / 12
-    momentum <- monthly / monthly_avg
+    ratio <- mom$ratio
 
-    if (momentum >= 1.1) {
+    # State the size of the move so the claim can be checked against
+    # the chart above it.
+    shift <- abs(round((ratio - 1) * 100))
+    against <- paste0(
+      " \u2014 30-day rate ", shift, "% ",
+      if (ratio >= 1) "above" else "below",
+      " the prior ", mom$baseline_days, " days"
+    )
+
+    if (ratio >= 1.1) {
       score <- score + 25
       details$momentum <- list(
-        text = "Downloads trending up",
+        text = paste0("Downloads trending up", against),
         sentiment = "good"
       )
-    } else if (momentum >= 0.9) {
+    } else if (ratio >= 0.9) {
       score <- score + 20
       details$momentum <- list(
         text = "Downloads stable",
         sentiment = "good"
       )
-    } else if (momentum >= 0.7) {
+    } else if (ratio >= 0.7) {
       score <- score + 12
       details$momentum <- list(
-        text = "Downloads slightly declining",
+        text = paste0("Downloads slightly declining", against),
         sentiment = "warn"
       )
     } else {
       score <- score + 5
       details$momentum <- list(
-        text = "Downloads declining",
+        text = paste0("Downloads declining", against),
         sentiment = "bad"
       )
     }
@@ -388,6 +437,44 @@ build_version_history <- function(versions_data) {
   df <- df[order(df$date, decreasing = TRUE), ]
   df$days_since <- as.numeric(Sys.Date() - df$date)
   df
+}
+
+#' Order a crandb timeline into a version/date frame, oldest first
+#' @param timeline Named list of ISO release timestamps
+#' @return Data frame with `version` and `date`, or NULL if empty
+version_release_frame <- function(timeline) {
+  if (is.null(timeline) || length(timeline) == 0) return(NULL)
+
+  df <- data.frame(
+    version = names(timeline),
+    date = as.Date(substr(unlist(timeline), 1, 10)),
+    stringsAsFactors = FALSE
+  )
+  df <- df[order(df$date), ]
+  rownames(df) <- NULL
+  df
+}
+
+#' Map each week to the version that was current when the week began
+#'
+#' A release that never held a week boundary gets no week here, which is
+#' why the chart draws those as markers instead of bands.
+#'
+#' @param weeks Date vector of week start dates
+#' @param timeline Named list of ISO release timestamps
+#' @return Character vector the same length as weeks, or NULL
+weekly_version_map <- function(weeks, timeline) {
+  ver_df <- version_release_frame(timeline)
+  if (is.null(ver_df) || length(weeks) == 0) return(NULL)
+
+  vapply(weeks, function(w) {
+    idx <- which(ver_df$date <= w)
+    if (length(idx) == 0) {
+      ver_df$version[1]
+    } else {
+      ver_df$version[max(idx)]
+    }
+  }, character(1))
 }
 
 #' Overlay the live CRAN record onto lagging crandb data

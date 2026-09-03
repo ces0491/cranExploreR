@@ -291,6 +291,62 @@ fetch_reverse_deps <- function(pkg_name) {
   })
 }
 
+#' Fetch the current version of every package on CRAN
+#'
+#' The search index lags CRAN the same way crandb does, so the version it
+#' reports alongside each hit can be out of date. One read of the CRAN
+#' repository index corrects every result at once, which a per-package
+#' DESCRIPTION request could not do for a 50-row page.
+#'
+#' The repository is named explicitly: `getOption("repos")` may point at a
+#' date-pinned Package Manager snapshot on the deployment host, which
+#' would reintroduce the staleness this is here to remove.
+#'
+#' @return Named character vector of versions keyed by package, or NULL
+fetch_cran_versions <- function() {
+  key <- "cran-index"
+  hit <- cache_get(key)
+  if (!is.null(hit)) return(hit)
+
+  tryCatch({
+    index <- available.packages(
+      repos = "https://cran.r-project.org", filters = character()
+    )
+    if (is.null(index) || nrow(index) == 0) return(NULL)
+
+    versions <- stats::setNames(
+      as.character(index[, "Version"]),
+      as.character(index[, "Package"])
+    )
+    versions <- versions[!is.na(versions) & nzchar(versions)]
+    if (length(versions) == 0) return(NULL)
+
+    cache_set(key, versions)
+  }, error = function(e) {
+    NULL
+  })
+}
+
+#' Replace search-result versions with the current CRAN versions
+#'
+#' Leaves a row untouched when CRAN has no entry for it, which covers
+#' archived packages still present in the search index.
+#'
+#' @param df Data frame with `package` and `version` columns
+#' @param versions Named character vector from fetch_cran_versions()
+#' @return The data frame with `version` corrected where possible
+apply_cran_versions <- function(df, versions = fetch_cran_versions()) {
+  if (is.null(df) || is.null(versions)) return(df)
+  if (!all(c("package", "version") %in% names(df))) return(df)
+
+  idx <- match(df$package, names(versions))
+  found <- !is.na(idx)
+  if (any(found)) {
+    df$version[found] <- unname(versions[idx[found]])
+  }
+  df
+}
+
 #' Run a query against the r-pkg search index
 #'
 #' @param query_string Character, the value of the q parameter, already
@@ -324,7 +380,12 @@ run_package_search <- function(query_string, limit) {
   })
 
   df <- do.call(rbind, results)
-  attr(df, "total") <- data$hits$total %||% nrow(df)
+  total <- data$hits$total %||% nrow(df)
+
+  # The index's own version field can be days behind CRAN.
+  df <- apply_cran_versions(df)
+
+  attr(df, "total") <- total
   df
 }
 
@@ -343,13 +404,13 @@ search_packages <- function(query, limit = 20) {
       if (is.null(meta)) return(NULL)
 
       mnt <- meta$Maintainer %||% ""
-      data.frame(
+      apply_cran_versions(data.frame(
         package = meta$Package %||% query,
         title = meta$Title %||% "",
         version = meta$Version %||% "",
         maintainer = gsub("<.*>", "", mnt),
         stringsAsFactors = FALSE
-      )
+      ))
     }
   )
 }

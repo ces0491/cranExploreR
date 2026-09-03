@@ -522,8 +522,14 @@ ui <- page_navbar(
               tags$td("Download momentum"),
               tags$td("25%"),
               tags$td(
-                "Whether downloads are growing,",
-                "stable, or declining"
+                "Mean downloads per day over the last",
+                "30 days against the mean over every",
+                "earlier day on record. Rates rather",
+                "than totals, because cranlogs starts",
+                "at a package's first publication, so",
+                "dividing a young package's total by",
+                "twelve months would report a decline",
+                "as growth"
               )
             ),
             tags$tr(
@@ -568,11 +574,13 @@ ui <- page_navbar(
               href = "https://cran.r-project.org",
               "CRAN"
             ),
-            " \u2014 Current published version.",
-            "crandb can sit several days behind CRAN,",
-            "so where the two disagree the CRAN version",
-            "is shown and the missing release is added",
-            "to the version history."
+            " \u2014 Current published versions.",
+            "crandb and the search index can both sit",
+            "several days behind CRAN, so the version",
+            "shown for a package and for each search",
+            "result is taken from CRAN, and a release",
+            "missing from crandb is added to the",
+            "version history."
           ),
           tags$li(
             tags$a(

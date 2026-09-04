@@ -18,6 +18,19 @@ custom_css <- tags$style(HTML(
   ".bslib-value-box .value-box-value {
     font-size: clamp(1.2rem, 2.5vw, 2rem);
     white-space: nowrap;
+  }
+
+  /* Keep the nav reachable on the long Explorer page. Sticky rather
+     than Bootstrap's fixed-top, which leaves the page flow to be
+     padded by hand. bslib renders the navbar as a direct child of
+     body, and page_navbar(fillable = FALSE) leaves body as the
+     scroll container, which is what sticky needs. The selector is
+     one step more specific than Bootstrap's own .navbar rule so it
+     wins regardless of stylesheet order. */
+  body > .navbar {
+    position: sticky;
+    top: 0;
+    z-index: 1030;
   }"
 ))
 
@@ -60,6 +73,31 @@ ui <- page_navbar(
 
         # Package header
         uiOutput("package_header"),
+
+        # The tiles carry bare numbers, so the row says what they
+        # count and the icon carries the caveat about what CRAN's
+        # figures include.
+        tags$div(
+          class = "d-flex align-items-center gap-2 mb-2",
+          tags$h5("Downloads", class = "mb-0"),
+          tooltip(
+            tags$span(
+              icon("circle-info"),
+              class = "text-muted",
+              style = "cursor: help;"
+            ),
+            paste(
+              "CRAN counts every fetch from Posit's mirror, which",
+              "includes CRAN mirrors and crawlers as well as",
+              "installs. Across nine packages sampled over 13 days,",
+              "the share coming from R itself ranged from 9% to 54%,",
+              "and was lowest for the least-downloaded packages.",
+              "They also count installs of anything that depends on",
+              "this package. Read these as an upper bound."
+            ),
+            placement = "right"
+          )
+        ),
 
         layout_columns(
           col_widths = c(3, 3, 3, 3),
@@ -609,7 +647,32 @@ ui <- page_navbar(
               href = "https://cranlogs.r-pkg.org",
               "cranlogs"
             ),
-            " \u2014 Download statistics"
+            " \u2014 Download statistics.",
+            tags$br(),
+            tags$em("What a download is:"),
+            "these are counts of fetches from Posit's CRAN mirror,",
+            "so CRAN mirrors and crawlers are counted alongside",
+            "installs. The raw logs record the R version a client",
+            "reported, and a fetch with none did not come from",
+            "install.packages(). Sampling nine packages over 13 days",
+            "in Aug and Sep 2026, the share that reported an R",
+            "version ran from 9% to 54%, lowest for the packages with",
+            "the fewest downloads. Every download figure here is",
+            "therefore an upper bound, and the gap is widest for",
+            "small packages.",
+            tags$br(),
+            tags$em("Dependencies count too:"),
+            "installing any package pulls its dependencies down with",
+            "it, so a widely-depended-on package's downloads reflect",
+            "the ecosystem around it as much as direct interest in",
+            "it. A package with no reverse dependencies is counted",
+            "only when someone chooses it. This point, and deeper",
+            "filtering of the raw logs, comes from Peter Li's",
+            tags$a(
+              href = "https://cran.r-project.org/package=packageRank",
+              "packageRank"
+            ),
+            "package."
           ),
           tags$li(
             tags$a(

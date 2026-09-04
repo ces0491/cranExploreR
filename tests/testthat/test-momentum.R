@@ -22,7 +22,7 @@ test_that("a young package is not reported as growing while it declines", {
     daily
   )
   expect_equal(h$details$momentum$sentiment, "bad")
-  expect_equal(h$details$momentum$text, "Downloads declining")
+  expect_match(h$details$momentum$text, "^Downloads declining — ")
 
   # The old baseline, for contrast: 3064/12 = 255, against 326 a month.
   expect_gt(326 / (3064 / 12), 1.1)
@@ -35,7 +35,7 @@ test_that("growth is still reported as growth", {
     list(last_month = 600, last_year = 3000), list(total = 0), daily
   )
   expect_equal(h$details$momentum$sentiment, "good")
-  expect_equal(h$details$momentum$text, "Downloads trending up")
+  expect_match(h$details$momentum$text, "^Downloads trending up — ")
 })
 
 test_that("a flat series reads as stable", {
@@ -44,7 +44,7 @@ test_that("a flat series reads as stable", {
     NULL, fake_versions("1.0.0", format(Sys.Date() - 1, "%Y-%m-%d")),
     list(last_month = 360, last_year = 4380), list(total = 0), daily
   )
-  expect_equal(h$details$momentum$text, "Downloads stable")
+  expect_match(h$details$momentum$text, "^Downloads stable — ")
 })
 
 test_that("the label stays short; the numbers live on the chart", {
@@ -53,7 +53,7 @@ test_that("the label stays short; the numbers live on the chart", {
     NULL, fake_versions("1.0.0", format(Sys.Date() - 1, "%Y-%m-%d")),
     list(last_month = 300, last_year = 4000), list(total = 0), daily
   )
-  expect_equal(h$details$momentum$text, "Downloads declining")
+  expect_match(h$details$momentum$text, "^Downloads declining — ")
 
   # The Trend overlay draws these, so they have to be recoverable.
   m <- download_momentum(daily)

@@ -9,7 +9,7 @@ cranExploreR pulls live data from CRAN APIs to give you download statistics, mai
 ### Explorer
 
 - **Search** CRAN packages by name or keyword with server-side search
-- **Download stats** — yesterday, past 7 days, past 30 days, and past 365 days with auto-scaling display
+- **Download counts** — yesterday, past 7 days, past 30 days, and past 365 days, labelled and carrying the caveat below
 - **Download trend chart** — 12-month weekly downloads with toggleable overlays:
   - Weekly totals (default)
   - Cumulative downloads
@@ -72,6 +72,34 @@ On a platform where `install.packages()` resolves to a binary, that older
 version is what gets installed until the build lands.
 
 Download figures still come from cranlogs and can lag by a day or two.
+
+### What a download count includes
+
+cranlogs counts fetches from Posit's CRAN mirror, so CRAN mirrors and
+crawlers are counted alongside installs. The raw logs at
+`cran-logs.rstudio.com` record the R version a client reported, and a fetch
+with none did not come from `install.packages()`.
+
+Sampling nine packages over 13 days in August and September 2026, the share
+reporting an R version ran from 9% to 54%, and was lowest for the packages
+with the fewest downloads — the bot traffic scales sub-linearly with real
+use (log-log slope 0.81), so it makes up more of a small package's total.
+Every download figure in the app is therefore an upper bound, widest of the
+mark for small packages.
+
+Installing any package also pulls its dependencies down with it, so a
+widely-depended-on package's downloads reflect the ecosystem around it as
+much as direct interest in it. A package with no reverse dependencies is
+counted only when someone chooses it. This point, and the observation that
+the bias dilutes as real downloads rise, come from Peter Li's
+[packageRank](https://cran.r-project.org/package=packageRank) and
+[his write-up of it](https://www.r-bloggers.com/2020/05/counting-and-visualizing-cran-downloads-with-packagerank-with-caveats/).
+
+The app does not adjust the counts. A correction would have to be modelled
+rather than measured, since cranlogs serves aggregates and the raw logs run
+to roughly 130 MB a day, and the scatter among small packages (9% to 47% at
+comparable volumes) is too wide for a modelled figure to be worth
+presenting as a total.
 
 Parsed responses are cached in memory for 15 minutes, so revisiting a package or
 pulling it into a comparison costs no further requests.

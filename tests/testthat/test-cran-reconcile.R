@@ -97,8 +97,8 @@ test_that("the new release lifts the recency factor", {
     NULL, fresh$versions, list(last_month = 100), list(total = 0)
   )
 
-  expect_equal(
-    updated$details$recency$text, "Updated within last 3 months"
+  expect_match(
+    updated$details$recency$text, "^Updated within last 3 months — "
   )
   expect_gt(updated$score, stale$score)
 })

@@ -122,7 +122,10 @@ test_that("a single dependent is described in the singular", {
     NULL, recent_versions(), list(last_month = 400),
     list(total = 1), NULL, marks
   )
-  expect_equal(h$details$ecosystem$text, "1 reverse dependency")
+  expect_match(h$details$ecosystem$text, "^1 reverse dependency \u2014 ")
+  expect_false(
+    grepl("dependencies", h$details$ecosystem$text, fixed = TRUE)
+  )
 })
 
 test_that("scoring is unaffected by the benchmark context", {

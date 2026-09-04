@@ -255,41 +255,43 @@ calculate_health_score <- function(
     last_update <- max(dates, na.rm = TRUE)
     days_since <- as.numeric(Sys.Date() - last_update)
 
-    if (days_since <= 90) {
-      score <- score + 30
-      details$recency <- list(
-        text = "Updated within last 3 months",
-        sentiment = "good"
-      )
+    # Every factor names the figure behind its band, so this one gives
+    # the release the band was judged on.
+    latest <- names(timeline)[which.max(dates)]
+    when <- paste0(
+      if (length(latest) == 1 && nzchar(latest)) {
+        paste0("v", latest, " on ")
+      },
+      format(last_update, "%Y-%m-%d")
+    )
+
+    band <- if (days_since <= 90) {
+      list(points = 30, text = "Updated within last 3 months",
+           sentiment = "good")
     } else if (days_since <= 180) {
-      score <- score + 25
-      details$recency <- list(
-        text = "Updated within last 6 months",
-        sentiment = "good"
-      )
+      list(points = 25, text = "Updated within last 6 months",
+           sentiment = "good")
     } else if (days_since <= 365) {
-      score <- score + 18
-      details$recency <- list(
-        text = "Updated within last year",
-        sentiment = "neutral"
-      )
+      list(points = 18, text = "Updated within last year",
+           sentiment = "neutral")
     } else if (days_since <= 730) {
-      score <- score + 10
-      details$recency <- list(
-        text = "Updated within last 2 years",
-        sentiment = "warn"
-      )
+      list(points = 10, text = "Updated within last 2 years",
+           sentiment = "warn")
     } else {
-      score <- score + 3
-      details$recency <- list(
+      list(
+        points = 3,
         text = paste0(
-          "Last updated ",
-          round(days_since / 365, 1),
-          " years ago"
+          "Last updated ", round(days_since / 365, 1), " years ago"
         ),
         sentiment = "bad"
       )
     }
+
+    score <- score + band$points
+    details$recency <- list(
+      text = with_context(band$text, NULL, NULL, when),
+      sentiment = band$sentiment
+    )
   } else {
     details$recency <- unavailable("Update history")
   }
@@ -297,38 +299,41 @@ calculate_health_score <- function(
   monthly <- download_totals$last_month %||% NA
 
   # 2. Download momentum (max 25 points)
-  # The Trend overlay on the chart shows the comparison behind this,
-  # so the label stays short.
   mom <- download_momentum(daily_downloads)
   if (!is.null(mom)) {
     max_score <- max_score + 25
     ratio <- mom$ratio
 
-    if (ratio >= 1.1) {
-      score <- score + 25
-      details$momentum <- list(
-        text = "Downloads trending up",
-        sentiment = "good"
-      )
-    } else if (ratio >= 0.9) {
-      score <- score + 20
-      details$momentum <- list(
-        text = "Downloads stable",
-        sentiment = "good"
-      )
-    } else if (ratio >= 0.7) {
-      score <- score + 12
-      details$momentum <- list(
-        text = "Downloads slightly declining",
-        sentiment = "warn"
-      )
+    # The Trend overlay plots this comparison; the label states it.
+    shift <- abs(round((ratio - 1) * 100))
+    against <- if (shift == 0) {
+      paste0("level with the prior ", mom$baseline_days, " days")
     } else {
-      score <- score + 5
-      details$momentum <- list(
-        text = "Downloads declining",
-        sentiment = "bad"
+      paste0(
+        shift, "% ", if (ratio >= 1) "above" else "below",
+        " the prior ", mom$baseline_days, " days"
       )
     }
+
+    band <- if (ratio >= 1.1) {
+      list(points = 25, text = "Downloads trending up",
+           sentiment = "good")
+    } else if (ratio >= 0.9) {
+      list(points = 20, text = "Downloads stable", sentiment = "good")
+    } else if (ratio >= 0.7) {
+      list(points = 12, text = "Downloads slightly declining",
+           sentiment = "warn")
+    } else {
+      list(points = 5, text = "Downloads declining", sentiment = "bad")
+    }
+
+    score <- score + band$points
+    details$momentum <- list(
+      text = with_context(
+        band$text, format_number(mom$recent), "/day", against
+      ),
+      sentiment = band$sentiment
+    )
   } else {
     details$momentum <- unavailable("Download trend")
   }
@@ -406,13 +411,16 @@ calculate_health_score <- function(
     } else if (rev_total >= 1) {
       score <- score + 4
       details$ecosystem <- list(
-        text = paste0(
-          rev_total,
-          if (rev_total == 1) {
-            " reverse dependency"
-          } else {
-            " reverse dependencies"
-          }
+        text = with_context(
+          paste0(
+            rev_total,
+            if (rev_total == 1) {
+              " reverse dependency"
+            } else {
+              " reverse dependencies"
+            }
+          ),
+          NULL, NULL, context
         ),
         sentiment = "warn"
       )

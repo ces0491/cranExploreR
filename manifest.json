@@ -2087,16 +2087,16 @@
       "checksum": "8ad4381e61d9078a8b0162f361b1ae61"
     },
     "R/helpers.R": {
-      "checksum": "77493a1c7023502ca3b1891435624eb8"
+      "checksum": "1ec7fb0a3d13fd34972fb7d7894df904"
     },
     "README.md": {
-      "checksum": "d17f1082981ebb2021a4e6ba0bb7e38a"
+      "checksum": "e2e3012a9fa51479ab1db2f0cdb108c2"
     },
     "server.R": {
       "checksum": "1ed66d1f564a71a53bed98a14b050533"
     },
     "ui.R": {
-      "checksum": "ee4f0de3b9ca75525b811e2d6f0f0370"
+      "checksum": "6faca5f0c92659c0772c0a2cee20cbec"
     }
   },
   "users": null

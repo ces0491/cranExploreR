@@ -2075,7 +2075,7 @@
   },
   "files": {
     ".github/workflows/ci.yml": {
-      "checksum": "6cbafcdb9eaf7dc42b70269e2df5f0bd"
+      "checksum": "c4adcbce78918b7e147c97cae848199a"
     },
     ".lintr": {
       "checksum": "cab5fdb2dddacc6c56d2f1389a469519"

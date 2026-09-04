@@ -107,6 +107,7 @@ ui <- page_navbar(
                   "Weekly" = "weekly",
                   "Cumulative" = "cumulative",
                   "Average" = "average",
+                  "Trend" = "trend",
                   "Versions" = "versions"
                 ),
                 selected = "weekly",
@@ -464,11 +465,12 @@ ui <- page_navbar(
           ),
           tags$li(
             tags$strong("Version history"),
-            " \u2014 A long, consistent release",
-            "history signals maturity.",
-            "A single release followed by silence",
-            "may indicate an experiment that was",
-            "never fully supported."
+            " \u2014 Time on CRAN is what the score",
+            "reads as maturity; a steady release",
+            "history on top of it signals sustained",
+            "maintenance. A single release followed",
+            "by silence may indicate an experiment",
+            "that was never fully supported."
           ),
           tags$li(
             tags$strong("The Compare tab"),
@@ -523,37 +525,50 @@ ui <- page_navbar(
               tags$td("25%"),
               tags$td(
                 "Mean downloads per day over the last",
-                "30 days against the mean over every",
-                "earlier day on record. Rates rather",
-                "than totals, because cranlogs starts",
-                "at a package's first publication, so",
-                "dividing a young package's total by",
-                "twelve months would report a decline",
-                "as growth"
+                "30 days, against the mean over the",
+                "days before them in the same 365-day",
+                "window. Rates rather than totals,",
+                "because cranlogs starts at a package's",
+                "first publication, so dividing a young",
+                "package's total by twelve months would",
+                "report a decline as growth"
               )
             ),
             tags$tr(
               tags$td("Download volume"),
               tags$td("20%"),
               tags$td(
-                "Absolute number of monthly",
-                "downloads"
+                "Monthly downloads, in seven bands cut",
+                "finer between 50 and 2,000 a month,",
+                "where close to nine in ten CRAN",
+                "packages sit. The label gives the",
+                "count and the package's percentile",
+                "across CRAN, since the median package",
+                "sees under 300 downloads a month"
               )
             ),
             tags$tr(
               tags$td("Ecosystem adoption"),
               tags$td("15%"),
               tags$td(
-                "Number of other packages that",
-                "depend on it"
+                "Number of other CRAN packages that",
+                "depend on it, with its percentile.",
+                "Around 70% of the repository has",
+                "none, so for a leaf package this",
+                "describes the kind of package as much",
+                "as its health"
               )
             ),
             tags$tr(
               tags$td("Maturity"),
               tags$td("10%"),
               tags$td(
-                "Total number of releases",
-                "over the package's lifetime"
+                "Time since the package first",
+                "appeared on CRAN. Release count tracks",
+                "age poorly, correlating at 0.49 across",
+                "a sample, so it is shown alongside as",
+                "a track record without feeding the",
+                "score"
               )
             )
           )
@@ -580,7 +595,14 @@ ui <- page_navbar(
             "shown for a package and for each search",
             "result is taken from CRAN, and a release",
             "missing from crandb is added to the",
-            "version history."
+            "version history.",
+            tags$br(),
+            tags$em("Source, not binaries:"),
+            "CRAN publishes the source package first",
+            "and builds binaries afterwards, separately",
+            "for each R branch, so the Windows and",
+            "macOS versions listed on a package's CRAN",
+            "page can trail this one by hours or days."
           ),
           tags$li(
             tags$a(

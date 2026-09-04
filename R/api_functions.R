@@ -444,6 +444,111 @@ fetch_packages_by_letter <- function(letter, limit = 50) {
   })
 }
 
+#' Sample the distribution of monthly downloads across CRAN
+#'
+#' Calling a package's volume "low" means nothing without knowing what
+#' the rest of CRAN looks like. cranlogs' /top endpoint caps at 100
+#' packages, so the distribution is estimated from a sample instead.
+#'
+#' The sample is systematic over the alphabetically sorted package list
+#' rather than random, so the percentile a user sees is stable between
+#' views and no RNG state is touched. A package's name carries no
+#' relationship to its popularity, so this is unbiased for the purpose.
+#'
+#' @param size Integer, how many packages to sample
+#' @param batch Integer, packages per cranlogs request
+#' @return Numeric vector of monthly download counts, or NULL
+fetch_download_distribution <- function(size = 600, batch = 200) {
+  key <- paste0("distribution|", size)
+  hit <- cache_get(key)
+  if (!is.null(hit)) return(hit)
+
+  tryCatch({
+    versions <- fetch_cran_versions()
+    if (is.null(versions)) return(NULL)
+
+    pkgs <- sort(names(versions))
+    if (length(pkgs) > size) {
+      pkgs <- pkgs[round(seq(1, length(pkgs), length.out = size))]
+    }
+
+    chunks <- split(pkgs, ceiling(seq_along(pkgs) / batch))
+    counts <- unlist(lapply(chunks, function(ch) {
+      data <- fetch_json(
+        paste0(
+          "https://cranlogs.r-pkg.org/downloads/total/last-month/",
+          paste(ch, collapse = ",")
+        ),
+        simplify = TRUE
+      )
+      if (is.data.frame(data) && "downloads" %in% names(data)) {
+        as.numeric(data$downloads)
+      } else {
+        numeric(0)
+      }
+    }), use.names = FALSE)
+
+    counts <- counts[!is.na(counts)]
+    if (length(counts) == 0) return(NULL)
+
+    cache_set(key, counts)
+  }, error = function(e) {
+    NULL
+  })
+}
+
+#' Count reverse dependencies for every package on CRAN
+#'
+#' The CRAN index carries each package's Depends, Imports, LinkingTo and
+#' Suggests, so inverting it gives the whole reverse-dependency graph
+#' from one request. crandb's per-package endpoint stays the source for
+#' the breakdown shown on screen; this exists to say where a count sits
+#' relative to the rest of CRAN.
+#'
+#' @return Named integer vector of counts keyed by package, or NULL
+fetch_revdep_counts <- function() {
+  key <- "revdep-counts"
+  hit <- cache_get(key)
+  if (!is.null(hit)) return(hit)
+
+  tryCatch({
+    index <- available.packages(
+      repos = "https://cran.r-project.org", filters = character()
+    )
+    if (is.null(index) || nrow(index) == 0) return(NULL)
+
+    fields <- c("Depends", "Imports", "LinkingTo", "Suggests")
+    depended_on <- unlist(lapply(fields, function(f) {
+      x <- index[, f]
+      x <- x[!is.na(x) & nzchar(x)]
+      parts <- unlist(strsplit(x, ",", fixed = TRUE))
+      trimws(sub("\\(.*", "", parts))
+    }), use.names = FALSE)
+    depended_on <- depended_on[nzchar(depended_on)]
+
+    tallied <- table(depended_on)
+    counts <- as.integer(tallied[rownames(index)])
+    counts[is.na(counts)] <- 0L
+    names(counts) <- rownames(index)
+
+    cache_set(key, counts)
+  }, error = function(e) {
+    NULL
+  })
+}
+
+#' Assemble the CRAN-wide distributions the score compares against
+#'
+#' Both are cached, so this is cheap after the first call in a session.
+#'
+#' @return List with `volume` and `revdeps` numeric vectors
+fetch_benchmarks <- function() {
+  list(
+    volume = fetch_download_distribution(),
+    revdeps = fetch_revdep_counts()
+  )
+}
+
 #' Fetch top downloaded packages from cranlogs
 #' @param count Integer, number of packages to return
 #' @return Data frame with package and downloads columns

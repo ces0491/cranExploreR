@@ -20,10 +20,10 @@ test_that("all factors present scores over the full weighting", {
     NULL, middling_versions(), middling_totals, list(total = 3),
     middling_daily()
   )
-  # 10/30 recency + 20/25 momentum + 6/20 volume
-  #  + 4/15 ecosystem + 4/10 maturity = 44 of 100
+  # 10/30 recency + 20/25 momentum + 5/20 volume
+  #  + 4/15 ecosystem + 4/10 maturity = 43 of 100
   expect_equal(h$weight_available, 100)
-  expect_equal(h$score, 44)
+  expect_equal(h$score, 43)
 })
 
 test_that("a failed lookup drops its weight instead of scoring zero", {
@@ -32,7 +32,7 @@ test_that("a failed lookup drops its weight instead of scoring zero", {
     middling_daily()
   )
   expect_equal(h$weight_available, 85)
-  expect_equal(h$score, 47)
+  expect_equal(h$score, 46)
   expect_equal(h$details$ecosystem$sentiment, "unknown")
   expect_match(h$details$ecosystem$text, "unavailable")
 })
@@ -43,8 +43,9 @@ test_that("zero reverse dependencies is scored, not treated as missing", {
     middling_daily()
   )
   expect_equal(h$weight_available, 100)
-  expect_equal(h$details$ecosystem$sentiment, "bad")
-  expect_equal(h$details$ecosystem$text, "No reverse dependencies")
+  # 70% of CRAN has no dependents, so this is not a red flag.
+  expect_equal(h$details$ecosystem$sentiment, "neutral")
+  expect_match(h$details$ecosystem$text, "^No reverse dependencies")
 })
 
 test_that("missing version history drops recency and maturity", {
@@ -85,9 +86,14 @@ test_that("every factor is reported whether or not it scored", {
 test_that("a strong package still scores well", {
   h <- calculate_health_score(
     NULL,
+    # Maturity is scored on age now, so a strong package needs a
+    # long history rather than merely many releases.
     fake_versions(
       paste0("1.", 0:11),
-      rep(format(Sys.Date() - 10, "%Y-%m-%d"), 12)
+      format(
+        Sys.Date() - round(seq(12 * 365, 10, length.out = 12)),
+        "%Y-%m-%d"
+      )
     ),
     list(
       last_day = 1e4, last_week = 7e4,

@@ -103,6 +103,116 @@ download_momentum <- function(daily, window = 30) {
   )
 }
 
+#' Place a monthly download count within the CRAN distribution
+#' @param monthly Numeric, a package's downloads in the last month
+#' @param distribution Numeric vector from fetch_download_distribution()
+#' @return Integer percentile 0-100, or NULL when it cannot be placed
+download_percentile <- function(monthly, distribution) {
+  if (is.null(monthly) || length(monthly) == 0 || is.na(monthly)) {
+    return(NULL)
+  }
+  if (is.null(distribution) || length(distribution) == 0) return(NULL)
+
+  round(100 * mean(distribution <= monthly))
+}
+
+#' Describe where a package sits in the CRAN download distribution
+#' @param pct Integer percentile from download_percentile()
+#' @return Character phrase, or NULL when pct is NULL
+percentile_phrase <- function(pct) {
+  if (is.null(pct)) return(NULL)
+
+  suffix <- "% of CRAN packages"
+
+  if (pct >= 99) return(paste0("in the top 1", suffix))
+  if (pct >= 90) return(paste0("in the top ", 100 - pct, suffix))
+  if (pct <= 10) {
+    return(paste0("in the bottom ", max(pct, 1), suffix))
+  }
+  paste0("above ", pct, suffix)
+}
+
+#' Say what share of CRAN shares a value of zero
+#' @param distribution Numeric vector of counts across CRAN
+#' @return Character phrase, or NULL when the distribution is missing
+share_phrase <- function(distribution) {
+  if (is.null(distribution) || length(distribution) == 0) return(NULL)
+
+  paste0(
+    "as for ", round(100 * mean(distribution == 0)),
+    "% of CRAN packages"
+  )
+}
+
+#' Join a label to the figures behind it
+#' @param label Character, the band name
+#' @param value Character, the measured value, or NULL
+#' @param unit Character, appended to value, or NULL
+#' @param context Character, the comparison phrase, or NULL
+#' @return Character
+with_context <- function(label, value = NULL, unit = NULL,
+                         context = NULL) {
+  parts <- c(
+    if (!is.null(value)) paste0(value, unit %||% ""),
+    context
+  )
+  if (length(parts) == 0) return(label)
+  paste0(label, " \u2014 ", paste(parts, collapse = ", "))
+}
+
+#' Format a duration in years for display
+#' @param years Numeric
+#' @return Character
+format_years <- function(years) {
+  if (years < 1) {
+    months <- max(1, round(years * 12))
+    return(paste0(months, if (months == 1) " month" else " months"))
+  }
+  paste0(round(years, 1), " years")
+}
+
+#' Band a monthly download count
+#'
+#' Seven bands rather than five, cut finer between 50 and 2,000 where
+#' most of CRAN sits. Decade-wide bands put close to nine in ten
+#' packages into a single one.
+#'
+#' @param monthly Numeric, downloads in the last month
+#' @return List with `points`, `label` and `sentiment`
+volume_band <- function(monthly) {
+  bands <- list(
+    list(min = 100000, points = 20, label = "Very high", sentiment = "good"),
+    list(min = 10000, points = 18, label = "High", sentiment = "good"),
+    list(min = 2000, points = 15, label = "Substantial", sentiment = "good"),
+    list(min = 500, points = 12, label = "Moderate", sentiment = "neutral"),
+    list(min = 200, points = 8, label = "Modest", sentiment = "warn"),
+    list(min = 50, points = 5, label = "Low", sentiment = "bad"),
+    list(min = -Inf, points = 2, label = "Very low", sentiment = "bad")
+  )
+  for (b in bands) if (monthly >= b$min) return(b)
+  bands[[length(bands)]]
+}
+
+#' Band a package's age on CRAN
+#' @param years Numeric, years since first publication
+#' @return List with `points`, `label` and `sentiment`
+maturity_band <- function(years) {
+  bands <- list(
+    list(min = 10, points = 10, label = "Long-established",
+         sentiment = "good"),
+    list(min = 6, points = 8, label = "Well-established",
+         sentiment = "good"),
+    list(min = 3, points = 6, label = "Established",
+         sentiment = "neutral"),
+    list(min = 1, points = 4, label = "Establishing",
+         sentiment = "warn"),
+    list(min = -Inf, points = 2, label = "New to CRAN",
+         sentiment = "warn")
+  )
+  for (b in bands) if (years >= b$min) return(b)
+  bands[[length(bands)]]
+}
+
 #' Calculate a maintenance health score (0-100)
 #'
 #' Each factor contributes to the denominator only when the data behind
@@ -118,10 +228,13 @@ download_momentum <- function(daily, window = 30) {
 #' @param daily_downloads Data frame from fetch_daily_downloads(), used
 #'   for the momentum factor; without it momentum is reported unavailable
 #'   rather than guessed at from period totals
+#' @param benchmarks List from fetch_benchmarks() holding the CRAN-wide
+#'   `volume` and `revdeps` distributions; when supplied the volume and
+#'   ecosystem labels say where the package sits against the rest of CRAN
 #' @return List with `score`, `details` and `weight_available`
 calculate_health_score <- function(
   metadata, versions_data, download_totals, rev_deps,
-  daily_downloads = NULL
+  daily_downloads = NULL, benchmarks = NULL
 ) {
   score <- 0
   max_score <- 0
@@ -184,24 +297,17 @@ calculate_health_score <- function(
   monthly <- download_totals$last_month %||% NA
 
   # 2. Download momentum (max 25 points)
+  # The Trend overlay on the chart shows the comparison behind this,
+  # so the label stays short.
   mom <- download_momentum(daily_downloads)
   if (!is.null(mom)) {
     max_score <- max_score + 25
     ratio <- mom$ratio
 
-    # State the size of the move so the claim can be checked against
-    # the chart above it.
-    shift <- abs(round((ratio - 1) * 100))
-    against <- paste0(
-      " \u2014 30-day rate ", shift, "% ",
-      if (ratio >= 1) "above" else "below",
-      " the prior ", mom$baseline_days, " days"
-    )
-
     if (ratio >= 1.1) {
       score <- score + 25
       details$momentum <- list(
-        text = paste0("Downloads trending up", against),
+        text = "Downloads trending up",
         sentiment = "good"
       )
     } else if (ratio >= 0.9) {
@@ -213,13 +319,13 @@ calculate_health_score <- function(
     } else if (ratio >= 0.7) {
       score <- score + 12
       details$momentum <- list(
-        text = paste0("Downloads slightly declining", against),
+        text = "Downloads slightly declining",
         sentiment = "warn"
       )
     } else {
       score <- score + 5
       details$momentum <- list(
-        text = paste0("Downloads declining", against),
+        text = "Downloads declining",
         sentiment = "bad"
       )
     }
@@ -228,74 +334,72 @@ calculate_health_score <- function(
   }
 
   # 3. Download volume (max 20 points)
+  #
+  # Sampling the repository puts close to nine in ten packages between
+  # 100 and 1,000 downloads a month, so decade-wide bands would give
+  # almost every package the same score. These cut finer through that
+  # range, and stay absolute counts because a few hundred downloads a
+  # month is a small user base however much of CRAN it happens to beat.
   if (!is.na(monthly)) {
     max_score <- max_score + 20
 
-    if (monthly >= 100000) {
-      score <- score + 20
-      details$volume <- list(
-        text = "Very high download volume",
-        sentiment = "good"
-      )
-    } else if (monthly >= 10000) {
-      score <- score + 16
-      details$volume <- list(
-        text = "High download volume",
-        sentiment = "good"
-      )
-    } else if (monthly >= 1000) {
-      score <- score + 12
-      details$volume <- list(
-        text = "Moderate download volume",
-        sentiment = "neutral"
-      )
-    } else if (monthly >= 100) {
-      score <- score + 6
-      details$volume <- list(
-        text = "Low download volume",
-        sentiment = "warn"
-      )
-    } else {
-      score <- score + 2
-      details$volume <- list(
-        text = "Very low download volume",
-        sentiment = "bad"
-      )
-    }
+    band <- volume_band(monthly)
+    score <- score + band$points
+    details$volume <- list(
+      text = with_context(
+        paste0(band$label, " download volume"),
+        format_number(monthly), "/month",
+        percentile_phrase(
+          download_percentile(monthly, benchmarks$volume)
+        )
+      ),
+      sentiment = band$sentiment
+    )
   } else {
     details$volume <- unavailable("Download volume")
   }
 
   # 4. Reverse dependencies (max 15 points)
+  #
   # A zero count is a real signal about the package. NULL means the
   # lookup failed, which says nothing about it either way.
+  #
+  # The thresholds stay as they are: 70% of CRAN has no reverse
+  # dependencies at all, so the mass sits on a single value that no
+  # rebanding can subdivide. What was misleading was scoring the modal
+  # case in red, since a leaf package having no dependents describes
+  # what kind of package it is rather than how healthy it is.
   if (!is.null(rev_deps)) {
     max_score <- max_score + 15
     rev_total <- rev_deps$total %||% 0
+    context <- percentile_phrase(
+      download_percentile(rev_total, benchmarks$revdeps)
+    )
 
     if (rev_total >= 100) {
       score <- score + 15
       details$ecosystem <- list(
-        text = paste0(
-          rev_total, " reverse dependencies",
-          " \u2014 core ecosystem package"
+        text = with_context(
+          paste0(rev_total, " reverse dependencies"),
+          NULL, NULL, "core ecosystem package"
         ),
         sentiment = "good"
       )
     } else if (rev_total >= 20) {
       score <- score + 12
       details$ecosystem <- list(
-        text = paste0(
-          rev_total, " reverse dependencies",
-          " \u2014 well-established"
+        text = with_context(
+          paste0(rev_total, " reverse dependencies"),
+          NULL, NULL, context
         ),
         sentiment = "good"
       )
     } else if (rev_total >= 5) {
       score <- score + 8
       details$ecosystem <- list(
-        text = paste0(
-          rev_total, " reverse dependencies"
+        text = with_context(
+          paste0(rev_total, " reverse dependencies"),
+          NULL, NULL, context
         ),
         sentiment = "neutral"
       )
@@ -303,56 +407,55 @@ calculate_health_score <- function(
       score <- score + 4
       details$ecosystem <- list(
         text = paste0(
-          rev_total, " reverse dependency"
+          rev_total,
+          if (rev_total == 1) {
+            " reverse dependency"
+          } else {
+            " reverse dependencies"
+          }
         ),
         sentiment = "warn"
       )
     } else {
       details$ecosystem <- list(
-        text = "No reverse dependencies",
-        sentiment = "bad"
+        text = with_context(
+          "No reverse dependencies", NULL, NULL,
+          share_phrase(benchmarks$revdeps)
+        ),
+        sentiment = "neutral"
       )
     }
   } else {
     details$ecosystem <- unavailable("Reverse dependencies")
   }
 
-  # 5. Version maturity (max 10 points)
-  if (!is.null(versions_data$versions)) {
-    max_score <- max_score + 10
-    n_versions <- length(versions_data$versions)
+  # 5. Maturity (max 10 points)
+  #
+  # Scored on time since first publication, not release count. Counting
+  # releases correlates only 0.49 with age, so a package that had sat on
+  # CRAN for a decade with three releases was labelled "relatively new".
+  # Release count still appears in the text, where it reads as a track
+  # record rather than as a claim about age.
+  first_release <- if (!is.null(timeline) && length(timeline) > 0) {
+    min(as.Date(substr(unlist(timeline), 1, 10)), na.rm = TRUE)
+  }
 
-    if (n_versions >= 10) {
-      score <- score + 10
-      details$maturity <- list(
-        text = paste0(
-          n_versions,
-          " releases \u2014 mature package"
-        ),
-        sentiment = "good"
-      )
-    } else if (n_versions >= 5) {
-      score <- score + 7
-      details$maturity <- list(
-        text = paste0(n_versions, " releases"),
-        sentiment = "neutral"
-      )
-    } else if (n_versions >= 2) {
-      score <- score + 4
-      details$maturity <- list(
-        text = paste0(
-          n_versions,
-          " releases \u2014 relatively new"
-        ),
-        sentiment = "warn"
-      )
-    } else {
-      score <- score + 1
-      details$maturity <- list(
-        text = "Single release",
-        sentiment = "warn"
-      )
-    }
+  if (!is.null(first_release) && !is.na(first_release)) {
+    max_score <- max_score + 10
+    years <- as.numeric(Sys.Date() - first_release) / 365.25
+    n_versions <- length(versions_data$versions %||% timeline)
+    band <- maturity_band(years)
+    score <- score + band$points
+
+    details$maturity <- list(
+      text = paste0(
+        band$label, " \u2014 ",
+        format_years(years), " on CRAN, ",
+        n_versions,
+        if (n_versions == 1) " release" else " releases"
+      ),
+      sentiment = band$sentiment
+    )
   } else {
     details$maturity <- unavailable("Release history")
   }
@@ -455,10 +558,17 @@ version_release_frame <- function(timeline) {
   df
 }
 
-#' Map each week to the version that was current when the week began
+#' Map each week to the version that was current when the week ended
 #'
-#' A release that never held a week boundary gets no week here, which is
-#' why the chart draws those as markers instead of bands.
+#' Taking the version current on the last day of the week rather than the
+#' first means a release published mid-week still owns that week. Judging
+#' from the first day instead loses any release superseded before the next
+#' Monday, and any release newer than the last full week, so the chart
+#' would silently show fewer versions than the package has released.
+#'
+#' Two releases inside one week still collapse to the later of them;
+#' weekly buckets cannot show both, and the version history table is the
+#' complete list.
 #'
 #' @param weeks Date vector of week start dates
 #' @param timeline Named list of ISO release timestamps
@@ -467,7 +577,7 @@ weekly_version_map <- function(weeks, timeline) {
   ver_df <- version_release_frame(timeline)
   if (is.null(ver_df) || length(weeks) == 0) return(NULL)
 
-  vapply(weeks, function(w) {
+  vapply(weeks + 6, function(w) {
     idx <- which(ver_df$date <= w)
     if (length(idx) == 0) {
       ver_df$version[1]

@@ -22,7 +22,7 @@ test_that("a young package is not reported as growing while it declines", {
     daily
   )
   expect_equal(h$details$momentum$sentiment, "bad")
-  expect_match(h$details$momentum$text, "^Downloads declining")
+  expect_equal(h$details$momentum$text, "Downloads declining")
 
   # The old baseline, for contrast: 3064/12 = 255, against 326 a month.
   expect_gt(326 / (3064 / 12), 1.1)
@@ -35,7 +35,7 @@ test_that("growth is still reported as growth", {
     list(last_month = 600, last_year = 3000), list(total = 0), daily
   )
   expect_equal(h$details$momentum$sentiment, "good")
-  expect_match(h$details$momentum$text, "^Downloads trending up")
+  expect_equal(h$details$momentum$text, "Downloads trending up")
 })
 
 test_that("a flat series reads as stable", {
@@ -47,15 +47,18 @@ test_that("a flat series reads as stable", {
   expect_equal(h$details$momentum$text, "Downloads stable")
 })
 
-test_that("the reported percentage matches the ratio", {
+test_that("the label stays short; the numbers live on the chart", {
   daily <- daily_series(200, early_rate = 20, late_rate = 10)
   h <- calculate_health_score(
     NULL, fake_versions("1.0.0", format(Sys.Date() - 1, "%Y-%m-%d")),
     list(last_month = 300, last_year = 4000), list(total = 0), daily
   )
-  # ratio 0.5 -> 50% below
-  expect_match(h$details$momentum$text, "50% below", fixed = TRUE)
-  expect_match(h$details$momentum$text, "prior 170 days", fixed = TRUE)
+  expect_equal(h$details$momentum$text, "Downloads declining")
+
+  # The Trend overlay draws these, so they have to be recoverable.
+  m <- download_momentum(daily)
+  expect_equal(m$baseline_days, 170)
+  expect_equal(round((1 - m$ratio) * 100), 50)
 })
 
 test_that("too little history reports momentum unavailable", {

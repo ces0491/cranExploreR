@@ -131,10 +131,13 @@ server <- function(input, output, session) {
         )
         if (reconciled$stale) {
           showNotification(
+            # cranlogs is a separate service and was serving current
+            # data throughout the last crandb stall, so say nothing
+            # about download figures here.
             paste0(
               "The crandb index is behind CRAN. Showing v",
               reconciled$metadata$Version,
-              " from CRAN; download history may lag too."
+              " and its release date from CRAN."
             ),
             type = "message",
             duration = 8
@@ -214,7 +217,8 @@ server <- function(input, output, session) {
         rv$health <- calculate_health_score(
           rv$metadata, rv$versions,
           rv$download_totals, rv$rev_deps,
-          rv$downloads_daily
+          rv$downloads_daily,
+          fetch_benchmarks()
         )
       }
     )
@@ -361,9 +365,8 @@ server <- function(input, output, session) {
     }
 
     if ("weekly" %in% selected && show_versions) {
-      # Map each week to the version current when the week began
+      # Map each week to the version current when the week ended
       timeline <- rv$versions$timeline
-      ver_df <- version_release_frame(timeline)
       weekly$version <- weekly_version_map(weekly$week, timeline)
 
       # Color palette for versions
@@ -412,27 +415,6 @@ server <- function(input, output, session) {
           )
       }
 
-      # A release only earns a band if it was the current version at
-      # the start of some week, so one superseded within a few days,
-      # or published since the last full week, gets none. Mark those
-      # with a dotted line, otherwise the legend silently reports
-      # fewer releases than the version history lists.
-      unbanded <- setdiff(ver_df$version, unique_vers)
-      for (v in unbanded) {
-        d <- ver_df$date[ver_df$version == v]
-        if (d < min(weekly$week)) next
-
-        p <- p |>
-          add_segments(
-            x = d, xend = d,
-            y = 0, yend = max(weekly$count, na.rm = TRUE),
-            line = list(
-              color = "grey", dash = "dot", width = 1
-            ),
-            name = paste0("v", v),
-            showlegend = TRUE
-          )
-      }
     }
 
     if (show_versions && !("weekly" %in% selected)) {
@@ -504,6 +486,50 @@ server <- function(input, output, session) {
           line = list(
             color = "#27ae60", width = 2,
             dash = "dash"
+          )
+        )
+    }
+
+    # Draw the comparison the viability score's momentum factor makes:
+    # the mean rate over the earlier period, stepping to the mean over
+    # the last 30 days. A fitted regression line would be the more
+    # conventional overlay, but it disagrees with the momentum verdict
+    # for a series that rose over the year and dipped recently, which
+    # would leave the chart contradicting the text beside it.
+    mom <- if ("trend" %in% selected) {
+      download_momentum(rv$downloads_daily)
+    }
+
+    if (!is.null(mom)) {
+      cutoff <- max(rv$downloads_daily$date) - 30
+      step <- data.frame(
+        week = c(
+          min(weekly$week), cutoff, cutoff, max(weekly$week)
+        ),
+        level = c(
+          rep(mom$baseline * 7, 2), rep(mom$recent * 7, 2)
+        )
+      )
+
+      shift <- abs(round((mom$ratio - 1) * 100))
+      caption <- paste0(
+        "30-day rate ", shift, "% ",
+        if (mom$ratio >= 1) "above" else "below",
+        " the prior ", mom$baseline_days, " days<br>",
+        "Earlier: ", format_number(mom$baseline), "/day",
+        " \u00b7 Last 30 days: ",
+        format_number(mom$recent), "/day"
+      )
+
+      p <- p |>
+        add_trace(
+          data = step,
+          x = ~week, y = ~level,
+          type = "scatter", mode = "lines",
+          name = "Trend",
+          hovertemplate = paste0(caption, "<extra></extra>"),
+          line = list(
+            color = "#8e44ad", width = 3, shape = "linear"
           )
         )
     }
@@ -804,8 +830,23 @@ server <- function(input, output, session) {
       })
     )
 
+    # The description is a paragraph, not a short value, so it runs the
+    # full width of the card. Leaving it in the table indented every
+    # line past the label column and squeezed the text into what was
+    # left, which is worse the longer the description runs.
+    description <- if (!is.null(meta$Description) &&
+                         nzchar(trimws(meta$Description))) {
+      tagList(
+        tags$strong("Description"),
+        tags$p(
+          trimws(meta$Description),
+          class = "mt-1 mb-0"
+        ),
+        tags$hr()
+      )
+    }
+
     fields <- list(
-      "Description" = meta$Description,
       "Maintainer" = trimws(maintainer),
       "License" = meta$License,
       "First Published" =
@@ -823,16 +864,20 @@ server <- function(input, output, session) {
     tags$div(
       links_ui,
       tags$hr(),
+      description,
       tags$table(
-        class = "table table-sm",
+        class = "table table-sm mb-0",
         tags$tbody(
           lapply(names(fields), function(key) {
             tags$tr(
               tags$td(
                 tags$strong(key),
+                # Shrink to the label's own width rather than
+                # reserving a third of the card for it.
                 style = paste(
-                  "width: 35%;",
-                  "white-space: nowrap;"
+                  "width: 1%;",
+                  "white-space: nowrap;",
+                  "padding-right: 1.5rem;"
                 )
               ),
               tags$td(fields[[key]])
@@ -1183,7 +1228,8 @@ server <- function(input, output, session) {
 
         rdeps <- fetch_reverse_deps(pkg)
         health <- calculate_health_score(
-          meta, versions, totals, rdeps, daily
+          meta, versions, totals, rdeps, daily,
+          fetch_benchmarks()
         )
 
         list(

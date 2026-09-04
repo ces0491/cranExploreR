@@ -14,7 +14,8 @@ cranExploreR pulls live data from CRAN APIs to give you download statistics, mai
   - Weekly totals (default)
   - Cumulative downloads
   - Mean weekly downloads over the period
-  - Version releases, colouring the weekly series by the version current at the start of each week. A release that never held a week boundary — superseded within days, or published since the last full week — is drawn as a dotted marker instead, so the legend accounts for every release in the version history
+  - Trend, drawing the comparison behind the momentum verdict: the mean daily rate over the earlier period stepping to the mean over the last 30 days, with the figures on hover
+  - Version releases, colouring the weekly series by the version current at the end of each week. Judging from the end rather than the start means a release published mid-week still owns that week; two releases inside one week collapse to the later, and the version history table remains the complete list
 - **Download statistics** — lifetime downloads, days on CRAN, daily and weekly averages, and peak day and week
 - **Viability score** (0-100) — weighted composite of recency, download momentum, volume, ecosystem adoption, and maturity
 - **Package links** — direct links to CRAN page, documentation/vignettes, GitHub repo, and issue tracker (when available)
@@ -57,8 +58,18 @@ shows the CRAN version and adds the missing release to the version history.
 
 The search index behind the sidebar and the Browse tab lags in the same way,
 so the version shown against each result is corrected against the CRAN
-repository index. That is one request covering every package, which a
-per-package DESCRIPTION read could not manage for a 50-row page.
+repository index. That is one request covering every package CRAN currently
+publishes, which a per-package DESCRIPTION read could not manage for a 50-row
+page. A package that has since been archived keeps the version the search
+index reported.
+
+The version shown is the published *source* version, taken from the package
+DESCRIPTION and the repository index. CRAN publishes the source first and
+builds binaries afterwards, separately for each R branch, so the Windows and
+macOS binaries listed on a package's CRAN page can trail it by hours or days.
+A reader comparing this app to that page may well see an older number there.
+On a platform where `install.packages()` resolves to a binary, that older
+version is what gets installed until the build lands.
 
 Download figures still come from cranlogs and can lag by a day or two.
 
@@ -83,9 +94,11 @@ shiny::runApp()
 
 ## Tests
 
-The unit tests cover scoring, formatting, dependency parsing, the CRAN
-reconciliation, search query construction and the response cache. They stub the
-HTTP layer, so they run offline and without touching the CRAN APIs.
+The unit tests cover the scoring bands and their labels, download momentum,
+the version-to-week mapping behind the chart, formatting, dependency parsing,
+the CRAN reconciliation, search query construction and the response cache.
+They stub the HTTP layer, so they run offline and without touching the CRAN
+APIs.
 
 ```r
 install.packages("testthat")
@@ -120,17 +133,38 @@ The viability score (0-100) is a weighted composite that summarises five dimensi
 | Factor | Weight | What it measures |
 | ------ | ------ | ---------------- |
 | Recency | 30% | How recently the package was updated on CRAN |
-| Download momentum | 25% | Mean downloads per day over the last 30 days against the mean over every earlier day on record |
-| Download volume | 20% | Absolute number of monthly downloads |
-| Ecosystem adoption | 15% | Number of other packages that depend on it |
-| Maturity | 10% | Total number of releases over the package's lifetime |
+| Download momentum | 25% | Mean downloads per day over the last 30 days against the mean over the preceding days in the 365-day window |
+| Download volume | 20% | Monthly downloads, in seven bands, shown with the count and the package's percentile across CRAN |
+| Ecosystem adoption | 15% | Number of other CRAN packages that depend on it, with its percentile |
+| Maturity | 10% | Time since first publication on CRAN; the release count is shown alongside |
+
+The band edges are drawn from the repository, not picked by eye. A sample of
+600 packages puts the median at under 300 downloads a month, with close to nine
+in ten falling between 100 and 1,000. Bands a decade wide would therefore give
+most of CRAN the same score, so volume runs in seven bands cut finer through
+that range. The edges are absolute counts: a few hundred downloads a month is a
+small user base however much of the repository it beats. The percentile sits
+beside the count in the label so both readings are available.
+
+About 70% of packages have no reverse dependencies, counted across the whole
+repository index. That single value holds too much of the distribution to
+subdivide, so the thresholds there are coarse and no dependents is reported
+plainly: for a leaf package it describes the kind of package as much as its
+health.
+
+Maturity is time since first publication. Release count tracks age poorly —
+they correlate at 0.49 across a 140-package sample, in which one package in
+eight had been on CRAN eight years or more with four releases or fewer — so
+the release count appears in the label as a track record without feeding the
+score.
 
 Momentum compares rates per day rather than period totals, because cranlogs
 returns data only from a package's first publication. A package four months old
 has four months of rows, so dividing its total by twelve months would understate
-the baseline threefold and report a decline as growth. A package with fewer than
-60 days on CRAN has no baseline to compare against, and momentum is reported as
-unavailable rather than guessed at.
+the baseline threefold and report a decline as growth. The window is the last
+365 days: the mean daily rate over the most recent 30 against the mean over the
+days before them. Under 60 days of download data leaves no baseline to compare
+against, and momentum is reported as unavailable.
 
 A factor whose data cannot be fetched is dropped from the calculation rather
 than scored zero, and the score is renormalised over the remaining weight, so an

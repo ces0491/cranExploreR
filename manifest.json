@@ -2075,7 +2075,7 @@
   },
   "files": {
     ".github/workflows/ci.yml": {
-      "checksum": "ce33fa50c7160523fe2380f1d8a83ca6"
+      "checksum": "6cbafcdb9eaf7dc42b70269e2df5f0bd"
     },
     ".lintr": {
       "checksum": "cab5fdb2dddacc6c56d2f1389a469519"
@@ -2084,19 +2084,19 @@
       "checksum": "3626b7722275d3bd1ad5884a15a808f9"
     },
     "R/api_functions.R": {
-      "checksum": "92375ca66dea5db4a7949536ad914bbc"
+      "checksum": "8ad4381e61d9078a8b0162f361b1ae61"
     },
     "R/helpers.R": {
-      "checksum": "78ef9013274038f3e1bf81e09b6cde54"
+      "checksum": "77493a1c7023502ca3b1891435624eb8"
     },
     "README.md": {
-      "checksum": "f31d5b74276f2bff8113b2ec4322d202"
+      "checksum": "d17f1082981ebb2021a4e6ba0bb7e38a"
     },
     "server.R": {
-      "checksum": "bfee8350c0686f6e84ac2fa0f6dcbbc5"
+      "checksum": "1ed66d1f564a71a53bed98a14b050533"
     },
     "ui.R": {
-      "checksum": "dbce29d071a4f2e38137bfb2ffd175cf"
+      "checksum": "ee4f0de3b9ca75525b811e2d6f0f0370"
     }
   },
   "users": null

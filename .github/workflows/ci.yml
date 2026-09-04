@@ -84,7 +84,11 @@ jobs:
             "cache_get", "cache_set", "cache_clear",
             "fetch_cran_versions", "apply_cran_versions",
             "version_release_frame", "weekly_version_map",
-            "download_momentum"
+            "download_momentum", "fetch_download_distribution",
+            "download_percentile", "percentile_phrase",
+            "share_phrase", "with_context", "format_years",
+            "volume_band", "maturity_band",
+            "fetch_revdep_counts", "fetch_benchmarks"
           )
           missing_fns <- fns[!vapply(fns, exists, logical(1))]
           if (length(missing_fns) > 0) {

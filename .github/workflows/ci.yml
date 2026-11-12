@@ -72,6 +72,8 @@ jobs:
           fns <- c(
             "fetch_package_metadata", "fetch_package_versions",
             "fetch_daily_downloads", "fetch_download_totals",
+            "fetch_latest_log_day", "fill_daily_gaps",
+            "clean_daily", "first_publication",
             "fetch_reverse_deps", "search_packages",
             "fetch_top_downloads", "format_number",
             "calculate_health_score", "health_score_color",
@@ -84,7 +86,9 @@ jobs:
             "cache_get", "cache_set", "cache_clear",
             "fetch_cran_versions", "apply_cran_versions",
             "version_release_frame", "weekly_version_map",
-            "download_momentum", "fetch_download_distribution",
+            "download_momentum", "rolling_rate", "average_downloads",
+            "peak_period", "peak_period_label", "date_span",
+            "fetch_download_distribution",
             "download_percentile", "percentile_phrase",
             "share_phrase", "with_context", "format_years",
             "volume_band", "maturity_band",
@@ -194,7 +198,20 @@ jobs:
           )
           cat("CRAN reconciliation OK\n")
 
-          daily <- fetch_daily_downloads("jsonlite")
+          # cranlogs leaves out days without downloads; the series
+          # is filled to one row per day up to its latest log day,
+          # which falls back silently if that response stops parsing
+          daily <- fetch_daily_downloads(
+            "jsonlite", since = first_publication(versions)
+          )
+          latest <- fetch_latest_log_day("jsonlite")
+          stopifnot(
+            !is.null(latest),
+            max(daily$date) == latest,
+            all(diff(daily$date) == 1)
+          )
+          cat("Daily series OK\n")
+
           health <- calculate_health_score(
             meta, versions, totals, rev_deps, daily
           )

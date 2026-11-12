@@ -146,11 +146,15 @@ server <- function(input, output, session) {
         rv$metadata <- reconciled$metadata
         rv$versions <- reconciled$versions
 
+        # The daily series starts at first publication, so days
+        # before the first download count as zeros
+        first_pub <- first_publication(rv$versions)
+
         incProgress(
           0.15, detail = "Fetching daily downloads"
         )
         rv$downloads_daily <- fetch_daily_downloads(
-          pkg_name
+          pkg_name, since = first_pub
         )
 
         # The daily series covers the same 365 days as the
@@ -167,12 +171,7 @@ server <- function(input, output, session) {
           0.15, detail = "Fetching lifetime downloads"
         )
         rv$lifetime_downloads <- NA_real_
-        if (!is.null(rv$versions$timeline)) {
-          first_pub <- min(as.Date(
-            substr(
-              unlist(rv$versions$timeline), 1, 10
-            )
-          ), na.rm = TRUE)
+        if (!is.null(first_pub)) {
           rv$lifetime_downloads <-
             fetch_lifetime_downloads(
               pkg_name, first_pub
@@ -299,18 +298,21 @@ server <- function(input, output, session) {
   })
 
   # Download value boxes
+  # cranlogs runs a day or so behind, so the count is for the latest day
+  # it has published, which is often not yesterday
   output$dl_day_title <- renderUI({
-    yesterday <- Sys.Date() - 1
+    day <- rv$download_totals$last_day_date
     tags$span(
-      "Yesterday",
-      tags$br(),
-      tags$small(
-        paste0(
-          format(yesterday, "%d %b %Y"),
-          " UTC"
-        ),
-        class = "fw-normal"
-      )
+      "Latest Day",
+      if (!is.null(day)) {
+        tagList(
+          tags$br(),
+          tags$small(
+            paste0(format(day, "%d %b %Y"), " UTC"),
+            class = "fw-normal"
+          )
+        )
+      }
     )
   })
   output$dl_day <- renderText({
@@ -465,8 +467,14 @@ server <- function(input, output, session) {
         )
     }
 
-    if ("average" %in% selected) {
-      avg_val <- round(mean(weekly$count))
+    # The daily rate times seven, matching the statistics panel. A mean
+    # of the plotted weekly totals would count the part-weeks at each end
+    # as whole weeks and sit below it.
+    avg_val <- if ("average" %in% selected) {
+      average_downloads(rv$downloads_daily, "week")
+    }
+
+    if (!is.null(avg_val)) {
       p <- p |>
         add_trace(
           data = weekly,
@@ -490,47 +498,38 @@ server <- function(input, output, session) {
         )
     }
 
-    # Draw the comparison the viability score's momentum factor makes:
-    # the mean rate over the earlier period, stepping to the mean over
-    # the last 30 days. A fitted regression line would be the more
-    # conventional overlay, but it disagrees with the momentum verdict
-    # for a series that rose over the year and dipped recently, which
-    # would leave the chart contradicting the text beside it.
-    mom <- if ("trend" %in% selected) {
-      download_momentum(rv$downloads_daily)
+    # Trailing average over the momentum window, scaled to a week to
+    # share the axis. Its last value is the recent rate the momentum
+    # verdict quotes, so it is drawn only when there is a verdict. A
+    # fitted regression line would disagree with that verdict for a
+    # series that rose over the year and dipped recently.
+    win <- MOMENTUM_WINDOW_DAYS
+    roll <- if ("trend" %in% selected &&
+                  !is.null(download_momentum(rv$downloads_daily, win))) {
+      rolling_rate(rv$downloads_daily, window = win)
     }
 
-    if (!is.null(mom)) {
-      cutoff <- max(rv$downloads_daily$date) - 30
-      step <- data.frame(
-        week = c(
-          min(weekly$week), cutoff, cutoff, max(weekly$week)
-        ),
-        level = c(
-          rep(mom$baseline * 7, 2), rep(mom$recent * 7, 2)
-        )
-      )
-
-      shift <- abs(round((mom$ratio - 1) * 100))
-      caption <- paste0(
-        "30-day rate ", shift, "% ",
-        if (mom$ratio >= 1) "above" else "below",
-        " the prior ", mom$baseline_days, " days<br>",
-        "Earlier: ", format_number(mom$baseline), "/day",
-        " \u00b7 Last 30 days: ",
-        format_number(mom$recent), "/day"
+    if (!is.null(roll)) {
+      # Plot each window at its middle day rather than its last, so the
+      # line sits over the weeks it averages instead of trailing the
+      # weekly totals by half a window
+      roll$middle <- roll$date - (win - 1) %/% 2
+      roll$weekly <- roll$rate * 7
+      roll$caption <- paste0(
+        win, " days to ", format(roll$date, "%d %b"), ": ",
+        format_number(roll$rate), "/day (",
+        format_number(roll$weekly), "/wk)"
       )
 
       p <- p |>
         add_trace(
-          data = step,
-          x = ~week, y = ~level,
+          data = roll,
+          x = ~middle, y = ~weekly,
+          text = ~caption,
+          hovertemplate = "%{text}<extra></extra>",
           type = "scatter", mode = "lines",
-          name = "Trend",
-          hovertemplate = paste0(caption, "<extra></extra>"),
-          line = list(
-            color = "#8e44ad", width = 3, shape = "linear"
-          )
+          name = paste0("Trend (", win, "-day avg)"),
+          line = list(color = "#8e44ad", width = 3)
         )
     }
 
@@ -668,29 +667,24 @@ server <- function(input, output, session) {
     peak_count <- format_number(df$count[peak_idx])
     peak_date <- format(df$date[peak_idx], "%d %b %Y")
 
-    # Average daily downloads (over available data)
-    avg_daily <- format_number(
-      round(mean(df$count))
-    )
+    # Averages all scale the one daily rate, so they agree with each
+    # other and with the chart's average line. A series shorter than a
+    # week or month has no average for it.
+    average_label <- function(unit) {
+      avg <- average_downloads(df, unit)
+      if (is.null(avg)) {
+        paste0("N/A (under a ", unit, " of data)")
+      } else {
+        format_number(avg)
+      }
+    }
+    avg_daily <- average_label("day")
+    avg_weekly <- average_label("week")
+    avg_monthly <- average_label("month")
 
-    # Aggregate weekly for weekly stats
-    df$week <- as.Date(cut(df$date, "week"))
-    weekly <- aggregate(
-      count ~ week, data = df, FUN = sum
-    )
-
-    # Peak week
-    peak_wk_idx <- which.max(weekly$count)
-    peak_wk_count <- format_number(
-      weekly$count[peak_wk_idx]
-    )
-    peak_wk_date <- format(
-      weekly$week[peak_wk_idx], "%d %b %Y"
-    )
-
-    # Average weekly
-    avg_weekly <- format_number(
-      round(mean(weekly$count))
+    peak_week_label <- peak_period_label(peak_period(df, "week"), "week")
+    peak_month_label <- peak_period_label(
+      peak_period(df, "month"), "month"
     )
 
     # Days on CRAN
@@ -719,40 +713,30 @@ server <- function(input, output, session) {
       )
     }
 
+    # Four rows a side, each average beside its peak
     layout_columns(
       col_widths = c(6, 6),
 
       tags$table(
         class = "table table-sm mb-0",
         tags$tbody(
-          stat_row(
-            "Lifetime Downloads", lifetime_dl
-          ),
-          stat_row("Days on CRAN", days_label),
-          stat_row(
-            "Daily Average (past year)", avg_daily
-          ),
-          stat_row(
-            "Weekly Average (past year)",
-            avg_weekly
-          )
+          stat_row("Lifetime Downloads", lifetime_dl),
+          stat_row("Daily Average (past year)", avg_daily),
+          stat_row("Weekly Average (past year)", avg_weekly),
+          stat_row("Monthly Average (past year)", avg_monthly)
         )
       ),
 
       tags$table(
         class = "table table-sm mb-0",
         tags$tbody(
+          stat_row("Days on CRAN", days_label),
           stat_row(
             "Peak Day",
             paste0(peak_count, " (", peak_date, ")")
           ),
-          stat_row(
-            "Peak Week",
-            paste0(
-              peak_wk_count,
-              " (w/c ", peak_wk_date, ")"
-            )
-          )
+          stat_row("Peak Week", peak_week_label),
+          stat_row("Peak Month", peak_month_label)
         )
       )
     )
@@ -1216,15 +1200,17 @@ server <- function(input, output, session) {
         meta <- fetch_package_metadata(pkg)
         if (is.null(meta)) return(NULL)
 
-        daily <- fetch_daily_downloads(pkg)
-        totals <- fetch_download_totals(pkg, daily)
         versions <- fetch_package_versions(pkg)
-
         reconciled <- reconcile_with_cran(
           meta, versions, fetch_cran_description(pkg)
         )
         meta <- reconciled$metadata
         versions <- reconciled$versions
+
+        daily <- fetch_daily_downloads(
+          pkg, since = first_publication(versions)
+        )
+        totals <- fetch_download_totals(pkg, daily)
 
         rdeps <- fetch_reverse_deps(pkg)
         health <- calculate_health_score(

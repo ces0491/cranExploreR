@@ -563,10 +563,11 @@ ui <- page_navbar(
               tags$td("25%"),
               tags$td(
                 "Mean downloads per day over the last",
-                "30 days, against the mean over the",
+                MOMENTUM_WINDOW_DAYS,
+                "days, against the mean over the",
                 "days before them in the same 365-day",
                 "window. Rates rather than totals,",
-                "because cranlogs starts at a package's",
+                "because the series starts at a package's",
                 "first publication, so dividing a young",
                 "package's total by twelve months would",
                 "report a decline as growth"

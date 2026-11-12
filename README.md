@@ -9,14 +9,14 @@ cranExploreR pulls live data from CRAN APIs to give you download statistics, mai
 ### Explorer
 
 - **Search** CRAN packages by name or keyword with server-side search
-- **Download counts** — yesterday, past 7 days, past 30 days, and past 365 days, labelled and carrying the caveat below
+- **Download counts** — the latest day cranlogs has published (it runs a day or so behind, so the card shows that day's date), past 7 days, past 30 days, and past 365 days, labelled and carrying the caveat below
 - **Download trend chart** — 12-month weekly downloads with toggleable overlays:
   - Weekly totals (default)
   - Cumulative downloads
-  - Mean weekly downloads over the period
-  - Trend, drawing the comparison behind the momentum verdict: the mean daily rate over the earlier period stepping to the mean over the last 30 days, with the figures on hover
+  - Mean weekly downloads over the period, the same figure as the Weekly Average in the statistics panel
+  - Trend, a trailing 30-day average scaled to a week and plotted at the middle of each window so it lines up with the weekly totals. Its last value is the 30-day rate the momentum verdict quotes, so it shows only when that verdict does; the per-day and per-week figures are on hover
   - Version releases, colouring the weekly series by the version current at the end of each week. Judging from the end rather than the start means a release published mid-week still owns that week; two releases inside one week collapse to the later, and the version history table remains the complete list
-- **Download statistics** — lifetime downloads, days on CRAN, daily and weekly averages, and peak day and week
+- **Download statistics** — lifetime downloads, days on CRAN, daily, weekly and monthly averages, and peak day, week and month. The averages all scale the one daily rate (×7 for a week, ×365.25/12 for a month), so they agree with each other and with the chart's average line; a package with under a week or month of data has no average for it. cranlogs leaves out days without downloads, so the daily series is filled with zeros from first publication to cranlogs' latest day before anything is averaged. A peak week or month the data covers only in part, such as the launch week or the current month to date, shows the days it covers instead of its name
 - **Viability score** (0-100) — weighted composite of recency, download momentum, volume, ecosystem adoption, and maturity
 - **Package links** — direct links to CRAN page, documentation/vignettes, GitHub repo, and issue tracker (when available)
 - **Package metadata** — maintainer, license, publication dates, R version requirements
@@ -122,8 +122,10 @@ shiny::runApp()
 
 ## Tests
 
-The unit tests cover the scoring bands and their labels, download momentum,
-the version-to-week mapping behind the chart, formatting, dependency parsing,
+The unit tests cover the scoring bands and their labels, download momentum
+and the trend line that ends on it, filling the days cranlogs leaves out of
+the daily series, the download averages and peak week and month, the
+version-to-week mapping behind the chart, formatting, dependency parsing,
 the CRAN reconciliation, search query construction and the response cache.
 They stub the HTTP layer, so they run offline and without touching the CRAN
 APIs.

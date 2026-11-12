@@ -161,13 +161,63 @@ fetch_package_versions <- function(pkg_name) {
   )
 }
 
-#' Fetch download counts from cranlogs
+#' The latest day cranlogs has published counts for
+#'
+#' cranlogs runs a day or so behind, so yesterday may not be in yet. Its
+#' last-day total carries the date it covers, which is the latest day in
+#' its logs for every package, including one with no downloads that day.
+#' fetch_download_totals() requests the same URL, so the cache answers
+#' the second of the two.
+#'
+#' @param pkg_name Character, package name
+#' @return Date, or NULL when it cannot be read
+fetch_latest_log_day <- function(pkg_name) {
+  tryCatch({
+    data <- fetch_json(
+      paste0(
+        "https://cranlogs.r-pkg.org/downloads/total/last-day/", pkg_name
+      ),
+      simplify = TRUE
+    )
+    day <- as.Date(data$end[1])
+    if (length(day) == 1 && !is.na(day)) day else NULL
+  }, error = function(e) NULL)
+}
+
+#' Fill the days cranlogs leaves out of a daily series with zeros
+#'
+#' cranlogs has no row for a day without downloads. Left sparse, a mean
+#' over rows is a mean over the days that had any, which overstates the
+#' rate of a package that goes days without one.
+#'
+#' @param dl Data frame with `date` and `count`
+#' @param start,end Dates the series should span. Widened if needed so no
+#'   row is dropped
+#' @return Data frame with one row per day from start to end
+fill_daily_gaps <- function(dl, start, end) {
+  start <- min(start, dl$date)
+  end <- max(end, dl$date)
+  days <- seq(start, end, by = "day")
+
+  count <- dl$count[match(days, dl$date)]
+  count[is.na(count)] <- 0L
+  data.frame(date = days, count = count)
+}
+
+#' Fetch daily download counts from cranlogs
+#'
+#' The series runs from the package's first publication, or `from` if
+#' that is later, to the latest day cranlogs has published, with the
+#' days cranlogs leaves out filled as zeros.
+#'
 #' @param pkg_name Character, package name
 #' @param from Date, start of range
 #' @param to Date, end of range
+#' @param since Date of first CRAN publication, or NULL when unknown, in
+#'   which case the series starts at the first day with a download
 #' @return Data frame with date and count columns or NULL
 fetch_daily_downloads <- function(
-  pkg_name, from = Sys.Date() - 365, to = Sys.Date() - 1
+  pkg_name, from = Sys.Date() - 365, to = Sys.Date() - 1, since = NULL
 ) {
   tryCatch({
     data <- fetch_json(
@@ -192,7 +242,16 @@ fetch_daily_downloads <- function(
         names(dl)[names(dl) == "downloads"] <- "count"
       }
       dl$date <- as.Date(dl$date)
-      return(dl)
+
+      start <- if (length(since) == 1 && !is.na(since)) {
+        max(from, since)
+      } else {
+        min(dl$date)
+      }
+      latest <- fetch_latest_log_day(pkg_name)
+      end <- if (is.null(latest)) max(dl$date) else min(to, latest)
+
+      return(fill_daily_gaps(dl, start, end))
     }
     NULL
   }, error = function(e) {
@@ -236,6 +295,7 @@ fetch_download_totals <- function(
 
   list(
     last_day = period_total("last-day"),
+    last_day_date = fetch_latest_log_day(pkg_name),
     last_week = period_total("last-week"),
     last_month = period_total("last-month"),
     last_year = year_total

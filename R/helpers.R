@@ -66,33 +66,45 @@ package_links_html <- function(pkg_name) {
   )
 }
 
+#' Length in days of the recent period the momentum factor compares, and
+#' of the chart's trend line that ends on it
+MOMENTUM_WINDOW_DAYS <- 30
+
+#' Validate a daily download series and keep the rows with a count
+#' @param daily Data frame from fetch_daily_downloads()
+#' @return The rows with a count, ordered by date, or NULL when there are
+#'   none or the frame lacks `date` and `count`
+clean_daily <- function(daily) {
+  if (is.null(daily) || !is.data.frame(daily)) return(NULL)
+  if (!all(c("date", "count") %in% names(daily))) return(NULL)
+  daily <- daily[!is.na(daily$count), ]
+  if (nrow(daily) == 0) return(NULL)
+  daily[order(daily$date), ]
+}
+
 #' Compare the recent download rate against the period before it
 #'
-#' Rates per day, not period totals, because cranlogs returns data only
-#' from a package's first publication. A package four months old has four
-#' months of rows, and dividing its total by twelve would understate the
+#' Rates per day, not period totals, because the series starts at a
+#' package's first publication. A package four months old has four months
+#' of days, and dividing its total by twelve would understate the
 #' baseline by three times, reporting a decline as growth.
 #'
 #' @param daily Data frame from fetch_daily_downloads(), with `date` and
-#'   `count`
+#'   `count`, one row per day
 #' @param window Integer, length in days of the recent period
 #' @return List with `ratio`, `recent`, `baseline` and `baseline_days`,
 #'   or NULL when there is too little history to compare
-download_momentum <- function(daily, window = 30) {
-  if (is.null(daily) || !is.data.frame(daily)) return(NULL)
-  if (!all(c("date", "count") %in% names(daily))) return(NULL)
-  if (nrow(daily) < window * 2) return(NULL)
+download_momentum <- function(daily, window = MOMENTUM_WINDOW_DAYS) {
+  daily <- clean_daily(daily)
+  if (is.null(daily) || nrow(daily) < window * 2) return(NULL)
 
-  daily <- daily[order(daily$date), ]
   cutoff <- max(daily$date) - window
-
   recent <- daily$count[daily$date > cutoff]
   before <- daily$count[daily$date <= cutoff]
   if (length(recent) == 0 || length(before) == 0) return(NULL)
 
-  recent_rate <- mean(recent, na.rm = TRUE)
-  baseline_rate <- mean(before, na.rm = TRUE)
-  if (is.na(recent_rate) || is.na(baseline_rate)) return(NULL)
+  recent_rate <- mean(recent)
+  baseline_rate <- mean(before)
   if (baseline_rate <= 0) return(NULL)
 
   list(
@@ -101,6 +113,144 @@ download_momentum <- function(daily, window = 30) {
     baseline = baseline_rate,
     baseline_days = length(before)
   )
+}
+
+#' Trailing average download rate over a rolling window
+#'
+#' Each date gets the mean daily count over the `window` days ending on
+#' it, cut by date the same way download_momentum() cuts its recent
+#' period, so the last value is the rate the momentum verdict quotes.
+#' Dates before a full window has elapsed are left out, since a mean over
+#' the first few days would swing on single days.
+#'
+#' @param daily Data frame from fetch_daily_downloads(), with `date` and
+#'   `count`, one row per day
+#' @param window Integer, length of the window in days
+#' @return Data frame with `date` (the last day of each window) and
+#'   `rate` (downloads per day), or NULL when the series is shorter than
+#'   one window
+rolling_rate <- function(daily, window = MOMENTUM_WINDOW_DAYS) {
+  daily <- clean_daily(daily)
+  if (is.null(daily)) return(NULL)
+
+  first_full <- min(daily$date) + window - 1
+  ends <- sort(unique(daily$date[daily$date >= first_full]))
+  if (length(ends) == 0) return(NULL)
+
+  rate <- vapply(ends, function(end) {
+    mean(daily$count[daily$date > end - window & daily$date <= end])
+  }, numeric(1))
+
+  data.frame(date = ends, rate = rate)
+}
+
+#' Average downloads per day, week or month over a daily series
+#'
+#' All three scale the one daily rate, so they agree with each other.
+#' Averaging calendar-week or calendar-month totals instead would count
+#' the part-periods at each end of the series as whole ones and
+#' understate the average. A series shorter than the unit has no average
+#' for it: scaling a few days' rate up to a month can come out above
+#' everything the package has been downloaded.
+#'
+#' @param daily Data frame from fetch_daily_downloads(), with `date` and
+#'   `count`, one row per day
+#' @param unit "day", "week" or "month" (a mean month of 365.25 / 12 days)
+#' @return Numeric, or NULL when there is no data or the series is
+#'   shorter than one unit
+average_downloads <- function(daily, unit = c("day", "week", "month")) {
+  unit <- match.arg(unit)
+  daily <- clean_daily(daily)
+  if (is.null(daily)) return(NULL)
+
+  days <- c(day = 1, week = 7, month = 365.25 / 12)[[unit]]
+  span <- as.integer(max(daily$date) - min(daily$date)) + 1
+  if (span < floor(days)) return(NULL)
+
+  mean(daily$count) * days
+}
+
+#' Find the calendar week or month with the most downloads
+#'
+#' Weeks start on Monday. The series rarely covers its end periods in
+#' full: the rolling window starts part-way through one, the current one
+#' runs only to cranlogs' latest day, and a package published within the
+#' window starts part-way through too. Those periods still compete on
+#' their totals, since a part-period that wins would only have won by
+#' more, but the days they cover come back with them so the count is not
+#' read as a whole period.
+#'
+#' @param daily Data frame from fetch_daily_downloads(), with `date` and
+#'   `count`, one row per day
+#' @param unit "week" or "month"
+#' @return List with `start` (Date the period begins), `count`,
+#'   `first_day` and `last_day` (the dates the series covers within the
+#'   period) and `complete` (TRUE when that is the whole period), or NULL
+#'   when there is no data
+peak_period <- function(daily, unit = c("week", "month")) {
+  unit <- match.arg(unit)
+  daily <- clean_daily(daily)
+  if (is.null(daily)) return(NULL)
+
+  period <- as.Date(cut(daily$date, unit, start.on.monday = TRUE))
+  totals <- tapply(daily$count, period, sum)
+  best <- which.max(totals)
+  start <- as.Date(names(totals)[best])
+
+  end <- if (unit == "week") {
+    start + 6
+  } else {
+    seq(start, by = "month", length.out = 2)[2] - 1
+  }
+  covered <- daily$date[period == start]
+
+  list(
+    start = start,
+    count = unname(totals[best]),
+    first_day = min(covered),
+    last_day = max(covered),
+    complete = length(unique(covered)) == as.integer(end - start) + 1
+  )
+}
+
+#' Describe a peak period for display
+#'
+#' A whole period goes by its usual name, "Apr 2026" or "w/c 02 Nov 2026"
+#' (week commencing that Monday). A part-period goes by the days it
+#' covers, so a count over a few days is not read as a whole week or month.
+#'
+#' @param peak List from peak_period()
+#' @param unit The unit peak_period() was called with
+#' @return Character such as "612 (Apr 2026)", or "N/A" when peak is NULL
+peak_period_label <- function(peak, unit = c("week", "month")) {
+  unit <- match.arg(unit)
+  if (is.null(peak)) return("N/A")
+
+  when <- if (!peak$complete) {
+    date_span(peak$first_day, peak$last_day)
+  } else if (unit == "week") {
+    paste0("w/c ", format(peak$start, "%d %b %Y"))
+  } else {
+    format(peak$start, "%b %Y")
+  }
+  paste0(format_number(peak$count), " (", when, ")")
+}
+
+#' Format a run of dates compactly, joined by an en dash
+#' @param from,to Dates, from on or before to
+#' @return Character such as "06-28 Feb 2026", "30 Jan - 01 Feb 2026" or
+#'   "29 Dec 2025 - 01 Jan 2026"
+date_span <- function(from, to) {
+  if (from == to) return(format(from, "%d %b %Y"))
+
+  same_year <- format(from, "%Y") == format(to, "%Y")
+  same_month <- same_year && format(from, "%m") == format(to, "%m")
+
+  if (same_month) {
+    return(paste0(format(from, "%d"), "\u2013", format(to, "%d %b %Y")))
+  }
+  left <- if (same_year) "%d %b" else "%d %b %Y"
+  paste0(format(from, left), " \u2013 ", format(to, "%d %b %Y"))
 }
 
 #' Place a monthly download count within the CRAN distribution
@@ -304,7 +454,8 @@ calculate_health_score <- function(
     max_score <- max_score + 25
     ratio <- mom$ratio
 
-    # The Trend overlay plots this comparison; the label states it.
+    # The label states the comparison in full; the chart's trend line
+    # ends on the recent rate but does not draw the baseline.
     shift <- abs(round((ratio - 1) * 100))
     against <- if (shift == 0) {
       paste0("level with the prior ", mom$baseline_days, " days")
@@ -548,6 +699,17 @@ build_version_history <- function(versions_data) {
   df <- df[order(df$date, decreasing = TRUE), ]
   df$days_since <- as.numeric(Sys.Date() - df$date)
   df
+}
+
+#' Date of a package's first CRAN release
+#' @param versions List from fetch_package_versions(), with `timeline`
+#' @return Date, or NULL when there is no readable timeline
+first_publication <- function(versions) {
+  timeline <- versions$timeline
+  if (is.null(timeline) || length(timeline) == 0) return(NULL)
+  dates <- as.Date(substr(unlist(timeline), 1, 10))
+  if (all(is.na(dates))) return(NULL)
+  min(dates, na.rm = TRUE)
 }
 
 #' Order a crandb timeline into a version/date frame, oldest first
